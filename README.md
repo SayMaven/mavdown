@@ -1,5 +1,7 @@
 # Maven Downloader (V1.5)
 
+![Maven Downloader Screenshot](https://res.cloudinary.com/ds4a54vuy/image/upload/v1783859043/Screenshot_mavdown_1_5.png)
+
 Maven Downloader adalah aplikasi GUI berbasis Python untuk mengunduh video dan audio dari berbagai platform dengan mudah. Aplikasi ini memanfaatkan `yt-dlp` sebagai *engine* utama, `aria2c` untuk mempercepat proses unduhan (*multi-connection*), dan `ffmpeg` untuk konversi media.
 
 Versi terbaru (V1.5) hadir dengan antarmuka modern yang ditenagai oleh `customtkinter`, perlindungan sistem dari *freeze* (komunikasi UI berbasis antrean/*thread-safe*), dan migrasi penuh ke Nuitka & Inno Setup.
