@@ -47,7 +47,7 @@ mavdown/
 
 ## Membangun Aplikasi (Build ke EXE Installer)
 
-Aplikasi ini menggunakan **Nuitka** (bukan PyInstaller) untuk menghasilkan performa maksimal dan sulit di-*decompile*, serta **Inno Setup** untuk membuat program instalasinya.
+Aplikasi ini menggunakan **Nuitka** (bukan PyInstaller) untuk menghasilkan performa eksekusi yang lebih cepat, waktu buka (*startup*) yang instan, dan menghindari deteksi *false-positive* antivirus yang sering menimpa PyInstaller. Pengemasan akhir menggunakan **Inno Setup**.
 
 1. Jalankan klik dua kali pada skrip `build_nuitka.bat`. (Pastikan modul `nuitka` sudah terinstall via pip).
 2. Nuitka akan membungkus aplikasi beserta aset `bin/` ke dalam folder `dist/`. Tunggu hingga selesai.
