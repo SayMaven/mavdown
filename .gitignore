@@ -1,0 +1,16 @@
+# PyInstaller
+build/
+dist/
+*.spec
+!mavdown.spec
+
+# App Data
+downloads/
+config.json
+
+# Cache
+__pycache__/
+*.pyc
+
+# Binaries (too large for git)
+bin/*.exe
