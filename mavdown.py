@@ -1,30 +1,33 @@
-import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext, filedialog 
+import customtkinter as ctk
+from tkinter import messagebox, filedialog
 import subprocess
 import threading
 import os
 import sys
-import shlex 
-import requests 
-from PIL import Image, ImageTk 
-from io import BytesIO 
-import re 
-import json 
+import shlex
+import requests
+from PIL import Image
+from io import BytesIO
+import re
+import json
+import queue
 
-if getattr(sys, 'frozen', False):
-    BASE_DIR = os.path.dirname(sys.executable)
-    _meipass = sys._MEIPASS 
-    YT_DLP_PATH = os.path.join(_meipass, "bin", "yt-dlp.exe")
-    ARIA2_PATH = os.path.join(_meipass, "bin", "aria2c.exe")
-    FFMPEG_PATH = os.path.join(_meipass, "bin", "ffmpeg.exe") 
+# Konfigurasi Path yang aman untuk Nuitka & Python murni
+if "__compiled__" in globals() or getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    YT_DLP_PATH = os.path.join(BASE_DIR, "bin", "yt-dlp.exe")
-    ARIA2_PATH = os.path.join(BASE_DIR, "bin", "aria2c.exe")
-    FFMPEG_PATH = os.path.join(BASE_DIR, "bin", "ffmpeg.exe") 
-    
+
+YT_DLP_PATH = os.path.join(BASE_DIR, "bin", "yt-dlp.exe")
+ARIA2_PATH = os.path.join(BASE_DIR, "bin", "aria2c.exe")
+FFMPEG_PATH = os.path.join(BASE_DIR, "bin", "ffmpeg.exe") 
+NODE_PATH = os.path.join(BASE_DIR, "bin", "node.exe")
+
 DEFAULT_OUTPUT_DIR = os.path.join(BASE_DIR, "downloads")
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
+
+# Antrean pesan untuk thread safety
+ui_queue = queue.Queue()
 
 def save_config(path):
     try:
@@ -45,10 +48,8 @@ def load_config():
                 saved_path = config.get('output_path', DEFAULT_OUTPUT_DIR)
                 if saved_path and os.path.isdir(saved_path):
                     return saved_path
-                return DEFAULT_OUTPUT_DIR
-        except Exception as e:
-            print(f"ERROR loading config: {e}")
-            return DEFAULT_OUTPUT_DIR
+        except Exception:
+            pass
     return DEFAULT_OUTPUT_DIR
 
 def create_yt_dlp_command(url, options=[]):
@@ -57,41 +58,21 @@ def create_yt_dlp_command(url, options=[]):
     command.append(url)
     return command
 
-def select_output_directory(output_path_var):
-    chosen_path = filedialog.askdirectory(title="Pilih Folder Output")
-    if chosen_path:
-        output_path_var.set(chosen_path)
-        save_config(chosen_path) 
+def update_progress_bar(line):
+    match_yt = re.search(r'\[download\]\s+(\d+\.\d+)%', line)
+    match_aria = re.search(r'\((\d+(?:\.\d+)?)%\)', line)
+    
+    if match_yt:
+        percent = float(match_yt.group(1))
+        ui_queue.put({"type": "progress", "value": percent / 100.0, "text": f"Progress: {percent:.1f}%"})
+    elif match_aria:
+        percent = float(match_aria.group(1))
+        ui_queue.put({"type": "progress", "value": percent / 100.0, "text": f"Progress: {percent:.1f}%"})
+        
+    ui_queue.put({"type": "log", "text": line})
 
-def open_output_directory(output_path_var, default_path):
-    current_path = output_path_var.get()
-    if not current_path:
-        current_path = default_path 
-    if os.path.exists(current_path):
-        try:
-            if sys.platform == "win32":
-                os.startfile(current_path)
-            elif sys.platform == "darwin": 
-                subprocess.Popen(["open", current_path])
-            else: 
-                subprocess.Popen(["xdg-open", current_path])
-        except Exception as e:
-            messagebox.showerror("Error", f"Gagal membuka folder: {e}")
-    else:
-        messagebox.showerror("Error", f"Folder tidak ditemukan: {current_path}")
-
-def update_progress_bar(log_area, progress_var, progress_label, line):
-    match = re.search(r'(\d+\.\d+)%', line)
-    if match:
-        percent = float(match.group(1))
-        progress_var.set(percent)
-        progress_label.config(text=f"Progress: {percent:.1f}%")
-    log_area.insert(tk.END, line)
-    log_area.see(tk.END) 
-    log_area.update_idletasks() 
-
-def get_video_info(url, thumb_label, title_label):
-    info_options = ["--skip-download", "--print-json"]
+def get_video_info(url):
+    info_options = ["--skip-download", "--print-json", "--js-runtimes", f"nodejs:{NODE_PATH}"]
     info_command = create_yt_dlp_command(url, options=info_options)
     startupinfo = None
     if os.name == 'nt': 
@@ -99,93 +80,84 @@ def get_video_info(url, thumb_label, title_label):
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = subprocess.SW_HIDE
     try:
-        title_label.config(text="Mengambil Info...")
-        thumb_label.config(text="Mengambil Thumbnail...", image='')
-        thumb_label.image = None
+        ui_queue.put({"type": "info_title", "title": "Mengambil Info..."})
+        ui_queue.put({"type": "info_thumb", "text": "Mengambil Thumbnail...", "image": None})
+        
         result = subprocess.run(info_command, capture_output=True, text=True, check=True, startupinfo=startupinfo)
         info = json.loads(result.stdout.strip())
         title = info.get('title', 'Judul Tidak Ditemukan')
-        title_label.config(text=f"Judul: {title}")
+        ui_queue.put({"type": "info_title", "title": f"Judul: {title}"})
+        
         thumb_url = info.get('thumbnail')
         if thumb_url and thumb_url.startswith('http'):
             image_data = requests.get(thumb_url).content
             image = Image.open(BytesIO(image_data))
-            max_size = (380, 300) 
-            image.thumbnail(max_size)
-            photo = ImageTk.PhotoImage(image)
-            thumb_label.config(image=photo, text="")
-            thumb_label.image = photo 
+            # CustomTkinter Image
+            ctk_image = ctk.CTkImage(light_image=image, size=(380, 250))
+            ui_queue.put({"type": "info_thumb", "text": "", "image": ctk_image})
         else:
-            thumb_label.config(text="Thumbnail tidak ditemukan.")
-            thumb_label.image = None
+            ui_queue.put({"type": "info_thumb", "text": "Thumbnail tidak ditemukan.", "image": None})
     except subprocess.CalledProcessError as e:
-        title_label.config(text=f"Gagal mendapatkan info video (url error). Cek log.")
-        print(f"yt-dlp error: {e.stderr}")
-        thumb_label.config(text="Gagal mendapatkan info thumbnail.")
+        ui_queue.put({"type": "info_title", "title": "Gagal mendapatkan info video (url error)."})
+        ui_queue.put({"type": "info_thumb", "text": "Gagal mendapatkan info thumbnail.", "image": None})
+        ui_queue.put({"type": "log", "text": f"yt-dlp error: {e.stderr}\n"})
     except FileNotFoundError:
-        title_label.config(text="ERROR: yt-dlp.exe tidak ditemukan di paket PyInstaller.")
-        thumb_label.config(text="Pastikan Anda menggunakan --add-data 'yt-dlp.exe;.' saat kompilasi.")
+        ui_queue.put({"type": "info_title", "title": "ERROR: yt-dlp.exe tidak ditemukan di bin/"})
     except Exception as e:
-        title_label.config(text=f"Error Info: {type(e).__name__}: {e}")
+        ui_queue.put({"type": "info_title", "title": f"Error Info: {e}"})
 
-def download_video_logic(url, url_entry_ref, mode_var, audio_only_format_var, resolution_var, video_codec_var, audio_codec_var, container_var, download_subs_var, embed_subs_var, subs_lang_var, embed_thumb_var, use_aria2_var, custom_output_path_var, custom_cmd_var, log_area, download_button, progress_var, progress_label):
-    custom_path = custom_output_path_var.get().strip()
-    if custom_path:
-        output_dir = custom_path
-    else:
-        output_dir = DEFAULT_OUTPUT_DIR
-    download_button.config(state=tk.DISABLED)
-    progress_var.set(0) 
-    progress_label.config(text="Progress: 0.0%")
+def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container, download_subs, embed_subs, subs_lang, embed_thumb, use_aria2, custom_path, custom_cmd):
+    output_dir = custom_path if custom_path else DEFAULT_OUTPUT_DIR
+    
+    ui_queue.put({"type": "progress", "value": 0, "text": "Progress: 0.0%"})
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    log_area.insert(tk.END, f"\n\n======================================================\n")
-    log_area.insert(tk.END, f"URL Sumber: {url}\n") 
-    log_area.insert(tk.END, f"Memulai Unduhan Baru Ke: {output_dir}\n")
-    options = ["--retries", "infinite", "--fragment-retries", "infinite"]
+        
+    ui_queue.put({"type": "log", "text": f"\n\n{'='*50}\n"})
+    ui_queue.put({"type": "log", "text": f"URL Sumber: {url}\n"}) 
+    ui_queue.put({"type": "log", "text": f"Memulai Unduhan Baru Ke: {output_dir}\n"})
+    
+    options = ["--retries", "infinite", "--fragment-retries", "infinite", "--js-runtimes", f"nodejs:{NODE_PATH}"]
     options.append(f"--ffmpeg-location={FFMPEG_PATH}")
-    custom_command = custom_cmd_var.get().strip()
-    if custom_command:
+    
+    if custom_cmd:
         try:
-            custom_args = shlex.split(custom_command)
+            custom_args = shlex.split(custom_cmd)
             options.extend(custom_args)
-            log_area.insert(tk.END, f"[MODE] Menggunakan Perintah Custom: {custom_command}\n")
+            ui_queue.put({"type": "log", "text": f"[MODE] Menggunakan Perintah Custom: {custom_cmd}\n"})
         except:
-            log_area.insert(tk.END, "[ERROR] Gagal parsing custom command.\n")
-            download_button.config(state=tk.NORMAL)
-            url_entry_ref.config(state=tk.NORMAL)
+            ui_queue.put({"type": "log", "text": "[ERROR] Gagal parsing custom command.\n"})
+            ui_queue.put({"type": "download_finish"})
             return
     else:
-        mode = mode_var.get()
-        subs_lang_raw = subs_lang_var.get().strip()
-        if use_aria2_var.get():
+        if use_aria2:
             options.extend([
                 "--external-downloader", ARIA2_PATH, 
                 "--external-downloader-args", "-x 16 -k 1M --allow-overwrite=true"
             ])
-            log_area.insert(tk.END, "[OPT] Menggunakan Aria2c sebagai external downloader.\n")
+            ui_queue.put({"type": "log", "text": "[OPT] Menggunakan Aria2c sebagai downloader.\n"})
+            
         if mode == "audio_only":
-            audio_format = audio_only_format_var.get()
             options.extend(["-f", "bestaudio", "--extract-audio", "--audio-format", audio_format])
-            log_area.insert(tk.END, f"[MODE] Mode: Audio Saja ({audio_format})\n")
+            ui_queue.put({"type": "log", "text": f"[MODE] Audio Saja ({audio_format})\n"})
         else:
-            res = resolution_var.get()
-            vcodec = video_codec_var.get()
-            acodec = audio_codec_var.get()
-            container = container_var.get()
-            vcodec_map = {"h264": "avc", "av1": "av01", "vp9": "vp09", "h265": "hevc"}
-            acodec_map = {"m4a": "m4a", "opus": "opus"}
+            vcodec_map = {"h264": "avc", "av1": "av01", "vp9": "vp09"}
+            acodec_map = {"m4a": "mp4a", "opus": "opus"}
+            
             f_video_parts = ["bestvideo"]
             if res != "best":
                 f_video_parts.append(f"[height<={res}]")
             if vcodec != "best":
                 f_video_parts.append(f"[vcodec~={vcodec_map[vcodec]}]")
+                
             f_audio_parts = ["bestaudio"]
             if acodec != "best":
                 f_audio_parts.append(f"[acodec~={acodec_map[acodec]}]")
+                
             f_video_str = "".join(f_video_parts)
             f_audio_str = "".join(f_audio_parts)
             res_str = "" if res == "best" else f"[height<={res}]"
+            
             format_string = (
                 f"{f_video_str}+{f_audio_str}/" 
                 f"{f_video_str}+bestaudio/" 
@@ -194,92 +166,55 @@ def download_video_logic(url, url_entry_ref, mode_var, audio_only_format_var, re
                 f"bestvideo+bestaudio/"
                 "best"
             )
-            log_area.insert(tk.END, f"[MODE] Video (V: {vcodec}, A: {acodec}, R: {res}p, C: {container})\n")
-            log_area.insert(tk.END, f"[DEBUG] Format string: {format_string}\n")
+            ui_queue.put({"type": "log", "text": f"[MODE] Video (V: {vcodec}, A: {acodec}, R: {res}p, C: {container})\n"})
             options.extend(["-f", format_string, "--merge-output-format", container])
-        if download_subs_var.get() or embed_subs_var.get():
-            subs_lang = subs_lang_raw if subs_lang_raw else "all" 
-            options.extend(["--write-subs", "--sub-langs", subs_lang]) 
-            if embed_subs_var.get():
+            
+        if download_subs or embed_subs:
+            lang = subs_lang if subs_lang else "all" 
+            options.extend(["--write-subs", "--sub-langs", lang]) 
+            if embed_subs:
                 options.append("--embed-subs")
-                log_area.insert(tk.END, f"[OPT] Subtitle ({subs_lang}) di-embed.\n")
-            if download_subs_var.get():
+                ui_queue.put({"type": "log", "text": f"[OPT] Subtitle ({lang}) di-embed.\n"})
+            if download_subs:
                 sub_format = "lrc" if mode == "audio_only" else "srt"
                 options.extend(["--sub-format", sub_format])
-                log_area.insert(tk.END, f"[OPT] Subtitle ({subs_lang}) diunduh terpisah (. {sub_format}).\n")
-        if embed_thumb_var.get():
+                ui_queue.put({"type": "log", "text": f"[OPT] Subtitle ({lang}) . {sub_format} terpisah.\n"})
+                
+        if embed_thumb:
             options.append("--embed-thumbnail")
-            log_area.insert(tk.END, "[OPT] Thumbnail akan di-embed.\n")
+            ui_queue.put({"type": "log", "text": "[OPT] Thumbnail di-embed.\n"})
+            
         options.extend(["-o", os.path.join(output_dir, "%(title)s.%(ext)s")])
+        
     command = create_yt_dlp_command(url, options)
-    log_area.insert(tk.END, f"\nPerintah Final: {' '.join(command)}\n")
+    ui_queue.put({"type": "log", "text": f"\nPerintah: {' '.join(command)}\n"})
+    
     try:
         startupinfo = None
         if os.name == 'nt': 
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = subprocess.SW_HIDE
+            
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True, startupinfo=startupinfo)
         for line in iter(process.stdout.readline, ''):
-            update_progress_bar(log_area, progress_var, progress_label, line)
+            update_progress_bar(line)
         process.wait() 
         if process.returncode == 0:
-            log_area.insert(tk.END, "\n\n--- UNDUHAN SUKSES ---\n")
+            ui_queue.put({"type": "log", "text": "\n\n--- UNDUHAN SUKSES ---\n"})
         else:
-            log_area.insert(tk.END, f"\n\n--- UNDUHAN GAGAL --- (Kode Keluar: {process.returncode})\n")
+            ui_queue.put({"type": "log", "text": f"\n\n--- UNDUHAN GAGAL --- (Kode: {process.returncode})\n"})
     except FileNotFoundError:
-        log_area.insert(tk.END, f"\nERROR: '{YT_DLP_PATH}' atau Aria2c tidak ditemukan. Pastikan sudah disertakan dengan benar menggunakan '--add-data'.")
+        ui_queue.put({"type": "log", "text": "\nERROR: yt-dlp atau aria2c tidak ditemukan."})
     except Exception as e:
-        log_area.insert(tk.END, f"\nERROR Tak Terduga: {type(e).__name__}: {e}")
+        ui_queue.put({"type": "log", "text": f"\nERROR Tak Terduga: {e}"})
     finally:
-        download_button.config(state=tk.NORMAL)
-        url_entry_ref.config(state=tk.NORMAL) 
-        if progress_var.get() < 100:
-            progress_var.set(100)
-            progress_label.config(text="Progress: Selesai")
+        ui_queue.put({"type": "download_finish"})
 
-def start_download_thread(url_entry, mode_var, audio_only_format_var, resolution_var, video_codec_var, audio_codec_var, container_var, download_subs_var, embed_subs_var, subs_lang_var, embed_thumb_var, use_aria2_var, custom_output_path_var, custom_cmd_var, log_area, download_button, progress_var, progress_label):
-    url = url_entry.get().strip()
-    if not url:
-        messagebox.showwarning("Input Kosong", "Masukkan URL video!")
-        return
-    url_entry.config(state=tk.DISABLED)
-    download_thread = threading.Thread(
-        target=download_video_logic, 
-        args=(url, url_entry, mode_var, audio_only_format_var, resolution_var, video_codec_var, audio_codec_var, container_var, download_subs_var, embed_subs_var, subs_lang_var, embed_thumb_var, use_aria2_var, custom_output_path_var, custom_cmd_var, log_area, download_button, progress_var, progress_label),
-        daemon=True
-    )
-    download_thread.start()
-
-def get_info_thread(url_entry, thumb_label, title_label, root):
-    url = url_entry.get().strip()
-    if not url:
-        title_label.config(text='Masukkan URL untuk melihat info.')
-        thumb_label.config(image='', text='Preview Thumbnail')
-        thumb_label.image = None
-        return
-    title_label.config(text='Mengambil Info...')
-    thumb_label.config(text='Mengambil Thumbnail...', image='')
-    thumb_label.image = None
-    thread = threading.Thread(target=get_video_info, args=(url, thumb_label, title_label), daemon=True)
-    thread.start()
-
-def toggle_options(mode_var, audio_only_frame, video_options_frame):
-    mode = mode_var.get()
-    if mode == "audio_only":
-        audio_only_frame.pack(fill=tk.X, pady=5)
-        video_options_frame.pack_forget()
-    else:
-        audio_only_frame.pack_forget()
-        video_options_frame.pack(fill=tk.X, pady=5)
-        
-def update_ytdlp_logic(log_area, progress_var, progress_label, update_button):
-    update_button.config(state=tk.DISABLED)
-    progress_var.set(10)
-    progress_label.config(text="Progress: Updating yt-dlp...")
-    log_area.insert(tk.END, "\n\n======================================================\n")
-    log_area.insert(tk.END, "Memulai Update yt-dlp...\n")
-    log_area.see(tk.END)
+def update_ytdlp_logic():
+    ui_queue.put({"type": "progress", "value": 0.1, "text": "Updating yt-dlp..."})
+    ui_queue.put({"type": "log", "text": "\n\nMemulai Update yt-dlp...\n"})
+    
     command = [YT_DLP_PATH, "-U"]
     try:
         startupinfo = None
@@ -289,203 +224,253 @@ def update_ytdlp_logic(log_area, progress_var, progress_label, update_button):
             startupinfo.wShowWindow = subprocess.SW_HIDE
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True, startupinfo=startupinfo)
         for line in iter(process.stdout.readline, ''):
-            log_area.insert(tk.END, line)
-            log_area.see(tk.END)
-            log_area.update_idletasks()
+            ui_queue.put({"type": "log", "text": line})
         process.wait()
         if process.returncode == 0:
-            log_area.insert(tk.END, "--- Update Selesai ---\n")
+            ui_queue.put({"type": "log", "text": "--- Update Selesai ---\n"})
         else:
-            log_area.insert(tk.END, f"--- Update Gagal (Kode Keluar: {process.returncode}) ---\n")
+            ui_queue.put({"type": "log", "text": f"--- Update Gagal ({process.returncode}) ---\n"})
     except Exception as e:
-        log_area.insert(tk.END, f"ERROR: {e}\n")
+        ui_queue.put({"type": "log", "text": f"ERROR: {e}\n"})
     finally:
-        progress_var.set(100)
-        progress_label.config(text="Progress: Selesai")
-        update_button.config(state=tk.NORMAL)
+        ui_queue.put({"type": "update_finish"})
 
-def start_update_thread(log_area, progress_var, progress_label, update_button):
-    threading.Thread(target=update_ytdlp_logic, args=(log_area, progress_var, progress_label, update_button), daemon=True).start()
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title("Maven Downloader (By SayMaven) V1.5")
+        self.geometry("1400x800")
+        ctk.set_appearance_mode("System")
+        ctk.set_default_color_theme("blue")
+        
+        try:
+            icon_path = os.path.join(BASE_DIR, "assets", "waifu_icon.ico")
+            self.iconbitmap(icon_path)
+        except Exception:
+            pass
+            
+        self.mode_var = ctk.StringVar(value="video_audio")
+        self.custom_cmd_var = ctk.StringVar()
+        self.custom_output_path_var = ctk.StringVar(value=load_config())
+        self.audio_only_format_var = ctk.StringVar(value="mp3")
+        self.resolution_var = ctk.StringVar(value="1080")
+        self.video_codec_var = ctk.StringVar(value="h264")
+        self.audio_codec_var = ctk.StringVar(value="m4a")
+        self.container_var = ctk.StringVar(value="mp4")
+        self.download_subs_var = ctk.BooleanVar(value=False)
+        self.embed_subs_var = ctk.BooleanVar(value=False)
+        self.subs_lang_var = ctk.StringVar(value="id,en")
+        self.embed_thumb_var = ctk.BooleanVar(value=False)
+        self.use_aria2_var = ctk.BooleanVar(value=True)
+
+        self.setup_ui()
+        self.after(100, self.process_ui_queue)
+
+    def process_ui_queue(self):
+        try:
+            while True:
+                msg = ui_queue.get_nowait()
+                msg_type = msg.get("type")
+                if msg_type == "log":
+                    self.log_area.insert("end", msg["text"])
+                    self.log_area.see("end")
+                elif msg_type == "progress":
+                    self.progress_bar.set(msg["value"])
+                    self.progress_label.configure(text=msg["text"])
+                elif msg_type == "info_title":
+                    self.title_label.configure(text=msg["title"])
+                elif msg_type == "info_thumb":
+                    if msg.get("image"):
+                        self.thumb_label.configure(image=msg["image"], text="")
+                    else:
+                        self.thumb_label.configure(text=msg.get("text", ""), image="")
+                elif msg_type == "download_finish":
+                    self.download_button.configure(state="normal")
+                    self.url_entry.configure(state="normal")
+                    self.progress_bar.set(1.0)
+                    self.progress_label.configure(text="Progress: Selesai")
+                elif msg_type == "update_finish":
+                    self.update_button.configure(state="normal")
+                    self.progress_bar.set(1.0)
+                    self.progress_label.configure(text="Progress: Selesai")
+        except queue.Empty:
+            pass
+        self.after(100, self.process_ui_queue)
+
+    def setup_ui(self):
+        main_frame = ctk.CTkFrame(self)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Header / URL Input
+        top_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        top_frame.pack(fill="x", pady=(0, 15))
+        
+        ctk.CTkLabel(top_frame, text="1. Masukkan URL Video:", font=ctk.CTkFont(weight="bold", size=14)).pack(anchor="w")
+        
+        input_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
+        input_frame.pack(fill="x", pady=5)
+        
+        self.url_entry = ctk.CTkEntry(input_frame, placeholder_text="https://www.youtube.com/watch?v=...", height=40)
+        self.url_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        
+        ctk.CTkButton(input_frame, text="Get Info", command=self.on_get_info, width=120, height=40, fg_color="#3B82F6", hover_color="#2563EB").pack(side="left", padx=(0, 10))
+        self.download_button = ctk.CTkButton(input_frame, text="START DOWNLOAD", command=self.on_download, width=150, height=40, fg_color="#10B981", hover_color="#059669")
+        self.download_button.pack(side="left")
+
+        # Output Folder Section
+        folder_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
+        folder_frame.pack(fill="x", pady=5)
+        ctk.CTkLabel(folder_frame, text="Folder Output:").pack(side="left")
+        
+        output_disp = ctk.CTkLabel(folder_frame, textvariable=self.custom_output_path_var, text_color="#3B82F6", font=ctk.CTkFont(weight="bold"))
+        output_disp.pack(side="left", padx=10)
+        
+        ctk.CTkButton(folder_frame, text="Pilih Folder", command=self.select_folder, width=100, height=30).pack(side="left", padx=5)
+        ctk.CTkButton(folder_frame, text="Buka Folder", command=self.open_folder, width=100, height=30).pack(side="left", padx=5)
+        self.update_button = ctk.CTkButton(folder_frame, text="Update yt-dlp", command=self.on_update, width=100, height=30, fg_color="#F59E0B", hover_color="#D97706")
+        self.update_button.pack(side="left", padx=5)
+
+        # Progress
+        prog_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
+        prog_frame.pack(fill="x", pady=5)
+        self.progress_label = ctk.CTkLabel(prog_frame, text="Progress: Siap")
+        self.progress_label.pack(side="left", padx=(0, 10))
+        self.progress_bar = ctk.CTkProgressBar(prog_frame)
+        self.progress_bar.pack(side="left", fill="x", expand=True)
+        self.progress_bar.set(0)
+
+        # Mid Content (Preview & Options)
+        mid_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        mid_frame.pack(fill="both", expand=True)
+
+        # Left Panel - Preview
+        preview_panel = ctk.CTkFrame(mid_frame, width=400)
+        preview_panel.pack(side="left", fill="y", padx=(0, 10))
+        preview_panel.pack_propagate(False)
+        ctk.CTkLabel(preview_panel, text="Video Info", font=ctk.CTkFont(weight="bold", size=14)).pack(pady=10)
+        self.title_label = ctk.CTkLabel(preview_panel, text="Judul: (Tekan Get Info)", wraplength=380, justify="left")
+        self.title_label.pack(fill="x", padx=10, pady=5)
+        self.thumb_label = ctk.CTkLabel(preview_panel, text="Preview Thumbnail", width=380, height=250, fg_color=("gray80", "gray20"), corner_radius=8)
+        self.thumb_label.pack(pady=10, padx=10)
+
+        # Right Panel - Options & Logs
+        right_panel = ctk.CTkFrame(mid_frame, fg_color="transparent")
+        right_panel.pack(side="left", fill="both", expand=True)
+        
+        opts_frame = ctk.CTkFrame(right_panel)
+        opts_frame.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(opts_frame, text="Opsi Download", font=ctk.CTkFont(weight="bold", size=14)).pack(anchor="w", padx=10, pady=(10, 0))
+
+        # Mode Selection
+        self.mode_frame = ctk.CTkFrame(opts_frame, fg_color="transparent")
+        self.mode_frame.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(self.mode_frame, text="Mode:").pack(side="left", padx=(0, 10))
+        ctk.CTkRadioButton(self.mode_frame, text="Video + Audio", variable=self.mode_var, value="video_audio", command=self.toggle_opts).pack(side="left", padx=5)
+        ctk.CTkRadioButton(self.mode_frame, text="Audio Only", variable=self.mode_var, value="audio_only", command=self.toggle_opts).pack(side="left", padx=5)
+        
+        # Audio Opts (Hidden by default or shown)
+        self.audio_opts = ctk.CTkFrame(opts_frame, fg_color="transparent")
+        ctk.CTkLabel(self.audio_opts, text="Format Audio:").pack(side="left", padx=(0, 10))
+        ctk.CTkRadioButton(self.audio_opts, text="MP3", variable=self.audio_only_format_var, value="mp3").pack(side="left", padx=5)
+        ctk.CTkRadioButton(self.audio_opts, text="M4A", variable=self.audio_only_format_var, value="m4a").pack(side="left", padx=5)
+
+        # Video Opts
+        self.video_opts = ctk.CTkFrame(opts_frame, fg_color="transparent")
+        self.video_opts.pack(fill="x", padx=10, pady=5)
+        
+        # Grid layout for video opts
+        v_codec = ctk.CTkFrame(self.video_opts, fg_color="transparent")
+        v_codec.pack(fill="x", pady=2)
+        ctk.CTkLabel(v_codec, text="Video Codec:", width=100, anchor="w").pack(side="left")
+        for text, val in [("H.264", "h264"), ("VP9", "vp9"), ("AV1", "av1"), ("Best", "best")]:
+            ctk.CTkRadioButton(v_codec, text=text, variable=self.video_codec_var, value=val).pack(side="left", padx=5)
+            
+        a_codec = ctk.CTkFrame(self.video_opts, fg_color="transparent")
+        a_codec.pack(fill="x", pady=2)
+        ctk.CTkLabel(a_codec, text="Audio Codec:", width=100, anchor="w").pack(side="left")
+        for text, val in [("M4A", "m4a"), ("Opus", "opus"), ("Best", "best")]:
+            ctk.CTkRadioButton(a_codec, text=text, variable=self.audio_codec_var, value=val).pack(side="left", padx=5)
+            
+
+        
+        # Adding a scrollable frame or wrapping it since there are many resolutions now, or just two lines of frames.
+        # Wait, since there are many radio buttons, they might overflow the window horizontally. Let's wrap them or keep them in one line if they fit.
+        # It's better to wrap them in two rows if needed, but let's just use grid instead of pack for res_frame.
+        
+        res_grid = ctk.CTkFrame(self.video_opts, fg_color="transparent")
+        res_grid.pack(fill="x", pady=2)
+        ctk.CTkLabel(res_grid, text="Resolusi Max:", width=100, anchor="w").grid(row=0, column=0, rowspan=2, padx=5, sticky="w")
+        
+        resolutions = [("Best", "best"), ("4K", "2160"), ("1440p", "1440"), ("1080p", "1080"), 
+                       ("720p", "720"), ("480p", "480"), ("360p", "360"), ("240p", "240"), ("144p", "144")]
+        for i, (text, val) in enumerate(resolutions):
+            row = i // 5
+            col = (i % 5) + 1
+            ctk.CTkRadioButton(res_grid, text=text, variable=self.resolution_var, value=val).grid(row=row, column=col, padx=5, pady=2, sticky="w")
+
+        # Extras
+        extras = ctk.CTkFrame(opts_frame, fg_color="transparent")
+        extras.pack(fill="x", padx=10, pady=10)
+        ctk.CTkCheckBox(extras, text="Download Sub", variable=self.download_subs_var).pack(side="left", padx=5)
+        ctk.CTkCheckBox(extras, text="Embed Sub", variable=self.embed_subs_var).pack(side="left", padx=5)
+        ctk.CTkEntry(extras, textvariable=self.subs_lang_var, width=80, placeholder_text="id,en").pack(side="left", padx=5)
+        ctk.CTkCheckBox(extras, text="Embed Thumb", variable=self.embed_thumb_var).pack(side="left", padx=5)
+        ctk.CTkCheckBox(extras, text="Gunakan Aria2c", variable=self.use_aria2_var).pack(side="left", padx=5)
+        
+        # Log Area
+        ctk.CTkLabel(right_panel, text="Log Proses", font=ctk.CTkFont(weight="bold")).pack(anchor="w")
+        self.log_area = ctk.CTkTextbox(right_panel, font=ctk.CTkFont(family="Consolas", size=12))
+        self.log_area.pack(fill="both", expand=True, pady=(5, 0))
+
+        # Initial toggle
+        self.toggle_opts()
+
+    def toggle_opts(self):
+        if hasattr(self, 'mode_frame'):
+            if self.mode_var.get() == "audio_only":
+                self.video_opts.pack_forget()
+                self.audio_opts.pack(fill="x", padx=10, pady=5, after=self.mode_frame)
+            else:
+                self.audio_opts.pack_forget()
+                self.video_opts.pack(fill="x", padx=10, pady=5, after=self.mode_frame)
+
+    def select_folder(self):
+        path = filedialog.askdirectory(title="Pilih Folder Output")
+        if path:
+            self.custom_output_path_var.set(path)
+            save_config(path)
+
+    def open_folder(self):
+        path = self.custom_output_path_var.get() or DEFAULT_OUTPUT_DIR
+        if os.path.exists(path):
+            if sys.platform == "win32":
+                os.startfile(path)
+            else:
+                subprocess.Popen(["xdg-open", path])
+
+    def on_get_info(self):
+        url = self.url_entry.get().strip()
+        if not url: return
+        threading.Thread(target=get_video_info, args=(url,), daemon=True).start()
+
+    def on_download(self):
+        url = self.url_entry.get().strip()
+        if not url: return
+        self.download_button.configure(state="disabled")
+        self.url_entry.configure(state="disabled")
+        
+        threading.Thread(target=download_video_logic, args=(
+            url, self.mode_var.get(), self.audio_only_format_var.get(),
+            self.resolution_var.get(), self.video_codec_var.get(), self.audio_codec_var.get(),
+            self.container_var.get(), self.download_subs_var.get(), self.embed_subs_var.get(),
+            self.subs_lang_var.get().strip(), self.embed_thumb_var.get(), self.use_aria2_var.get(),
+            self.custom_output_path_var.get(), self.custom_cmd_var.get().strip()
+        ), daemon=True).start()
+
+    def on_update(self):
+        self.update_button.configure(state="disabled")
+        threading.Thread(target=update_ytdlp_logic, daemon=True).start()
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    root.title("Maven Downloader (By SayMaven) V1.4") 
-    root.geometry("1440x750") 
-    try:
-        ICON_NAME_ICO = 'waifu_icon.ico' 
-        ICON_NAME_PNG = 'waifu_icon.png' 
-        if getattr(sys, 'frozen', False):
-             icon_path = os.path.join(sys._MEIPASS, "assets", ICON_NAME_ICO)
-        else:
-             icon_path = os.path.join(BASE_DIR, "assets", ICON_NAME_ICO)
-        root.iconbitmap(icon_path) 
-    except Exception:
-        try:
-            if getattr(sys, 'frozen', False):
-                 png_path = os.path.join(sys._MEIPASS, "assets", ICON_NAME_PNG)
-            else:
-                 png_path = os.path.join(BASE_DIR, "assets", ICON_NAME_PNG)
-            image = Image.open(png_path) 
-            photo = ImageTk.PhotoImage(image)
-            root.iconphoto(True, photo) 
-        except:
-             pass 
-    TITLE_FONT = ("TkDefaultFont", 12, "bold") 
-    initial_output_path = load_config() 
-    mode_var = tk.StringVar(value="video_audio")
-    custom_cmd_var = tk.StringVar()
-    custom_output_path_var = tk.StringVar(value=initial_output_path) 
-    audio_only_format_var = tk.StringVar(value="mp3")
-    resolution_var = tk.StringVar(value="1080")
-    video_codec_var = tk.StringVar(value="h264")
-    audio_codec_var = tk.StringVar(value="m4a")
-    container_var = tk.StringVar(value="mp4")
-    download_subs_var = tk.BooleanVar(value=False)
-    embed_subs_var = tk.BooleanVar(value=False)
-    subs_lang_var = tk.StringVar(value="id,en")
-    embed_thumb_var = tk.BooleanVar(value=False)
-    use_aria2_var = tk.BooleanVar(value=True)
-    progress_var = tk.DoubleVar()
-    main_frame = ttk.Frame(root, padding="10")
-    main_frame.pack(fill=tk.BOTH, expand=True)
-    top_frame = ttk.Frame(main_frame)
-    top_frame.pack(fill=tk.X)
-    url_label = ttk.Label(top_frame, text="1. Masukkan URL Video:")
-    url_label.pack(fill=tk.X)
-    url_entry = ttk.Entry(top_frame, width=100)
-    url_entry.pack(fill=tk.X, ipady=5, pady=(0, 5))
-    info_download_frame = ttk.Frame(top_frame)
-    info_download_frame.pack(fill=tk.X, pady=(0, 10))
-    get_info_button = ttk.Button(
-        info_download_frame, 
-        text="Get Info (Judul & Preview)",
-        command=lambda: get_info_thread(url_entry, thumb_label, title_label, root)
-    )
-    get_info_button.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=5, padx=(0, 5)) 
-    download_button = ttk.Button(
-        info_download_frame, 
-        text="START DOWNLOAD", 
-        command=lambda: start_download_thread(
-            url_entry, 
-            mode_var, audio_only_format_var,
-            resolution_var, video_codec_var, audio_codec_var, container_var,
-            download_subs_var, embed_subs_var, subs_lang_var, embed_thumb_var, 
-            use_aria2_var, 
-            custom_output_path_var, 
-            custom_cmd_var, log_area, download_button, progress_var, progress_label
-        )
-    )
-    download_button.pack(side=tk.RIGHT, fill=tk.X, expand=True, ipady=5, padx=(5, 0)) 
-    output_path_frame = ttk.Frame(top_frame)
-    output_path_frame.pack(fill=tk.X, pady=(5, 10))
-    output_label = ttk.Label(output_path_frame, text="Folder Output:")
-    output_label.pack(side=tk.LEFT, padx=(0, 5))
-    output_display_label = ttk.Label(output_path_frame, 
-                                     textvariable=custom_output_path_var, 
-                                     relief=tk.SUNKEN, 
-                                     anchor="w", 
-                                     foreground='blue')
-    output_display_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-    select_button = ttk.Button(
-        output_path_frame, 
-        text="Pilih Folder Output",
-        command=lambda: select_output_directory(custom_output_path_var)
-    )
-    select_button.pack(side=tk.LEFT, padx=5)
-    open_button = ttk.Button(
-        output_path_frame, 
-        text="Buka Folder Hasil",
-        command=lambda: open_output_directory(custom_output_path_var, DEFAULT_OUTPUT_DIR)
-    )
-    open_button.pack(side=tk.LEFT)
-    
-    update_button = ttk.Button(output_path_frame, text="Update yt-dlp")
-    update_button.pack(side=tk.LEFT, padx=(5, 0))
-    
-    progress_frame = ttk.Frame(top_frame)
-    progress_frame.pack(fill=tk.X, pady=(0, 10))
-    progress_label = ttk.Label(progress_frame, text="Progress: Siap", anchor="w")
-    progress_label.pack(side=tk.LEFT, padx=5, pady=5)
-    progress_bar = ttk.Progressbar(progress_frame, variable=progress_var, maximum=100)
-    progress_bar.pack(fill=tk.X, expand=True, padx=5)
-    mid_content_frame = ttk.Frame(main_frame)
-    mid_content_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-    preview_panel = ttk.Frame(mid_content_frame, width=400) 
-    preview_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
-    preview_panel.pack_propagate(False) 
-    thumb_frame = ttk.LabelFrame(preview_panel, text="1. Info Video", padding="10")
-    thumb_frame.pack(fill=tk.BOTH, expand=True, pady=0) 
-    title_label = tk.Label(thumb_frame, text="Judul: (Tekan Get Info)", anchor="w", font=TITLE_FONT, justify=tk.LEFT, wraplength=370)
-    title_label.pack(fill=tk.X, pady=(0, 5))
-    thumb_label = ttk.Label(thumb_frame, text="Preview Thumbnail", anchor="center")
-    thumb_label.pack(fill=tk.BOTH, expand=True)
-    options_panel = ttk.Frame(mid_content_frame)
-    options_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
-    options_frame = ttk.LabelFrame(options_panel, text="2. Pilihan Download & Kualitas", padding="10")
-    options_frame.pack(fill=tk.X, pady=5)
-    mode_frame = ttk.Frame(options_frame)
-    mode_frame.pack(fill=tk.X)
-    mode_label = ttk.Label(mode_frame, text="Mode Download:")
-    mode_label.pack(side=tk.LEFT, padx=5, pady=5)
-    rb_video = ttk.Radiobutton(mode_frame, text="Video + Audio", variable=mode_var, value="video_audio")
-    rb_video.pack(side=tk.LEFT, padx=5, pady=5)
-    rb_audio = ttk.Radiobutton(mode_frame, text="Audio Only", variable=mode_var, value="audio_only")
-    rb_audio.pack(side=tk.LEFT, padx=5, pady=5)
-    audio_only_frame = ttk.Frame(options_frame)
-    audio_format_label = ttk.Label(audio_only_frame, text="Format Audio:")
-    audio_format_label.pack(side=tk.LEFT, padx=5, pady=5)
-    ttk.Radiobutton(audio_only_frame, text="MP3 (Kompatibilitas)", variable=audio_only_format_var, value="mp3").pack(side=tk.LEFT, padx=5, pady=5)
-    ttk.Radiobutton(audio_only_frame, text="M4A (Kualitas Asli)", variable=audio_only_format_var, value="m4a").pack(side=tk.LEFT, padx=5, pady=5)
-    video_options_frame = ttk.Frame(options_frame)
-    vid_codec_label = ttk.Label(video_options_frame, text="Video Codec:")
-    vid_codec_label.grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
-    vcodecs = [("H.264", "h264"), ("VP9", "vp9"), ("AV1", "av1"), ("H.265", "h265"), ("Best", "best")]
-    for i, (text, val) in enumerate(vcodecs):
-        ttk.Radiobutton(video_options_frame, text=text, variable=video_codec_var, value=val).grid(row=0, column=i+1, padx=2, sticky=tk.W)
-    aud_codec_label = ttk.Label(video_options_frame, text="Audio Codec:")
-    aud_codec_label.grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
-    acodecs = [("M4A", "m4a"), ("Opus", "opus"), ("Best", "best")]
-    for i, (text, val) in enumerate(acodecs):
-        ttk.Radiobutton(video_options_frame, text=text, variable=audio_codec_var, value=val).grid(row=1, column=i+1, padx=2, sticky=tk.W)
-    container_label = ttk.Label(video_options_frame, text="Container:")
-    container_label.grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
-    containers = [("MP4", "mp4"), ("MKV", "mkv")]
-    for i, (text, val) in enumerate(containers):
-        ttk.Radiobutton(video_options_frame, text=text, variable=container_var, value=val).grid(row=2, column=i+1, padx=2, sticky=tk.W)
-    res_label = ttk.Label(video_options_frame, text="Max. Resolusi:")
-    res_label.grid(row=3, column=0, padx=5, pady=5, sticky=tk.W)
-    res_options = ["360", "480", "720", "1080", "1440", "2160", "best"]
-    for i, res in enumerate(res_options):
-         ttk.Radiobutton(video_options_frame, text=f"{res}p" if res != "best" else "Best", 
-                         variable=resolution_var, value=res).grid(row=3, column=i + 1, padx=2, sticky=tk.W)
-    rb_video.config(command=lambda: toggle_options(mode_var, audio_only_frame, video_options_frame))
-    rb_audio.config(command=lambda: toggle_options(mode_var, audio_only_frame, video_options_frame))
-    extras_frame = ttk.LabelFrame(options_panel, text="3. Opsi Downloader, Metadata & Subtitle", padding="10")
-    extras_frame.pack(fill=tk.X, pady=5)
-    aria2_check = ttk.Checkbutton(extras_frame, text="Gunakan Aria2c (Multi-thread Download)", variable=use_aria2_var)
-    aria2_check.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
-    thumb_check = ttk.Checkbutton(extras_frame, text="Gabungkan Thumbnail ke File", variable=embed_thumb_var)
-    thumb_check.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
-    subs_check = ttk.Checkbutton(extras_frame, text="Download Subtitle (SRT/LRC Terpisah)", variable=download_subs_var)
-    subs_check.grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
-    embed_subs_check = ttk.Checkbutton(extras_frame, text="Gabungkan Subtitle ke File", variable=embed_subs_var)
-    embed_subs_check.grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
-    subs_lang_label = ttk.Label(extras_frame, text="Bahasa (misal: id,en,ja,all):")
-    subs_lang_label.grid(row=4, column=0, padx=5, pady=5, sticky=tk.W)
-    subs_lang_entry = ttk.Entry(extras_frame, textvariable=subs_lang_var, width=15)
-    subs_lang_entry.grid(row=4, column=1, padx=5, pady=5, sticky=tk.W)
-    custom_frame = ttk.LabelFrame(options_panel, text="4. Custom Command", padding="10")
-    custom_frame.pack(fill=tk.X, pady=5)
-    custom_cmd_entry = ttk.Entry(custom_frame, textvariable=custom_cmd_var, width=100)
-    custom_cmd_entry.pack(fill=tk.X, ipady=5)
-    custom_cmd_label_hint = ttk.Label(custom_frame, text="Contoh: --skip-download --write-thumbnail. Untuk download thumbnail saja.", foreground='blue')
-    custom_cmd_label_hint.pack(fill=tk.X, pady=(5, 0))
-    log_panel = ttk.LabelFrame(mid_content_frame, text="5. Status/Log Unduhan (Real-time)", padding="10")
-    log_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-    log_area = scrolledtext.ScrolledText(log_panel, height=35, wrap=tk.WORD, state=tk.NORMAL)
-    log_area.pack(fill=tk.BOTH, expand=True) 
-
-    update_button.config(command=lambda: start_update_thread(log_area, progress_var, progress_label, update_button))
-
-    toggle_options(mode_var, audio_only_frame, video_options_frame)
-    root.mainloop()
+    app = App()
+    app.mainloop()
