@@ -1,10 +1,10 @@
-# Maven Downloader (V1.5)
+# Maven Downloader (V1.6)
 
 ![Maven Downloader Screenshot](https://res.cloudinary.com/ds4a54vuy/image/upload/v1783859043/Screenshot_mavdown_1_5.png)
 
 Maven Downloader adalah aplikasi GUI berbasis Python untuk mengunduh video dan audio dari berbagai platform dengan mudah. Aplikasi ini memanfaatkan `yt-dlp` sebagai *engine* utama, `aria2c` untuk mempercepat proses unduhan (*multi-connection*), dan `ffmpeg` untuk konversi media.
 
-Versi terbaru (V1.5) hadir dengan antarmuka modern yang ditenagai oleh `customtkinter`, perlindungan sistem dari *freeze* (komunikasi UI berbasis antrean/*thread-safe*), dan migrasi penuh ke Nuitka & Inno Setup.
+Versi terbaru (V1.6) hadir dengan antarmuka modern yang ditenagai oleh `customtkinter`, perlindungan sistem dari *freeze* (komunikasi UI berbasis antrean/*thread-safe*), dan migrasi penuh ke Nuitka & Inno Setup.
 
 ## Fitur Utama
 
@@ -20,9 +20,12 @@ Versi terbaru (V1.5) hadir dengan antarmuka modern yang ditenagai oleh `customtk
 mavdown/
 ├── assets/           # Berisi icon UI (waifu_icon.ico)
 ├── bin/              # Dependencies pihak ketiga (yt-dlp.exe, aria2c.exe, ffmpeg.exe, node.exe)
-├── dist/             # (Otomatis dibuat) Hasil kompilasi tingkat hardware dari Nuitka
-├── mavdown.py        # Kode sumber utama aplikasi
-├── build_nuitka.bat  # Skrip build mandiri
+├── dist/             # (Otomatis dibuat) Hasil kompilasi Nuitka beserta bundel bin/
+├── config.py         # Pengaturan direktori & konfigurasi aplikasi
+├── downloader.py     # Engine logika unduhan, yt-dlp, konversi lirik (.lrc), & update
+├── gui.py            # Antarmuka modern (Dark Slate UI, CustomTkinter)
+├── mavdown.py        # Entry point utama aplikasi
+├── build_nuitka.bat  # Skrip otomatisasi kompilasi Nuitka & penyalinan bin/
 ├── setup.iss         # Skrip pembuatan installer resmi (.exe) via Inno Setup
 └── requirements.txt  # Daftar pustaka Python yang dibutuhkan
 ```
@@ -53,7 +56,7 @@ Aplikasi ini menggunakan **Nuitka** (bukan PyInstaller) untuk menghasilkan perfo
 2. Nuitka akan membungkus aplikasi beserta aset `bin/` ke dalam folder `dist/`. Tunggu hingga selesai.
 3. Unduh dan pasang [Inno Setup](https://jrsoftware.org/isinfo.php).
 4. Buka file `setup.iss` melalui Inno Setup, lalu klik menu **Build > Compile**.
-5. Hasil akhirnya adalah `MavenDownloader_Setup_v1.5.exe` di dalam folder `Output/`, yang siap Anda distribusikan ke pengguna lain!
+5. Hasil akhirnya adalah `MavenDownloader_Setup_v1.6.exe` di dalam folder `Output/`, yang siap Anda distribusikan ke pengguna lain!
 
 ## Lisensi
 

@@ -122,7 +122,7 @@ class App(ctk.CTk):
         
         ver_badge = ctk.CTkFrame(brand_frame, fg_color="#26293B", corner_radius=6)
         ver_badge.pack(side="left", padx=10)
-        ctk.CTkLabel(ver_badge, text="v1.5", font=ctk.CTkFont(size=11, weight="bold"), text_color="#818CF8").pack(padx=8, pady=2)
+        ctk.CTkLabel(ver_badge, text="v1.6", font=ctk.CTkFont(size=11, weight="bold"), text_color="#818CF8").pack(padx=8, pady=2)
 
         # URL Input Row
         url_row = ctk.CTkFrame(header_inner, fg_color="transparent")
