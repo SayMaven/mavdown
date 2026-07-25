@@ -13,5 +13,8 @@ python -m nuitka ^
     --output-dir=dist ^
     mavdown.py
 
+echo Memindahkan biner pendukung ke folder output...
+xcopy /E /I /Y bin dist\mavdown.dist\bin
+
 echo Selesai kompilasi Nuitka.
 pause
