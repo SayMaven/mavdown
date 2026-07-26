@@ -2,4 +2,3 @@ requests
 Pillow
 customtkinter
 nuitka
-google-genai

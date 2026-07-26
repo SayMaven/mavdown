@@ -9,14 +9,10 @@ from PIL import Image
 import customtkinter as ctk
 from tkinter import filedialog
 
-from config import BASE_DIR, DEFAULT_OUTPUT_DIR, load_config, save_config, load_gemini_api_key
+from config import BASE_DIR, DEFAULT_OUTPUT_DIR, load_config, save_config
 from downloader import (
     ui_queue, get_video_info, download_video_logic,
     stop_current_process, update_ytdlp_logic
-)
-from ai_helper import (
-    analyze_download_error, clean_media_metadata,
-    recommend_download_settings, test_api_connection
 )
 
 # ---------------------------------------------------------------------------
@@ -95,143 +91,80 @@ QUICK_PRESETS = {
 # Settings Window
 # ===========================================================================
 class SettingsWindow(ctk.CTkToplevel):
-    def __init__(self, parent, current_api_key: str = "", on_save=None):
+    def __init__(self, parent, current_path: str = "", on_save=None):
         super().__init__(parent)
         self.title("⚙️ Pengaturan Maven Downloader")
-        self.geometry("500x420")
+        self.geometry("480x260")
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
         self.configure(fg_color="#0F1017")
         self.on_save_callback = on_save
-        self._test_result_var = ctk.StringVar()
 
-        # Center window relative to parent
         self.update_idletasks()
-        px = parent.winfo_x() + (parent.winfo_width() - 500) // 2
-        py = parent.winfo_y() + (parent.winfo_height() - 420) // 2
-        self.geometry(f"500x420+{px}+{py}")
+        px = parent.winfo_x() + (parent.winfo_width() - 480) // 2
+        py = parent.winfo_y() + (parent.winfo_height() - 260) // 2
+        self.geometry(f"480x260+{px}+{py}")
 
-        self._build_ui(current_api_key)
+        self._build_ui(current_path)
 
-    def _build_ui(self, current_api_key: str):
-        # Header
-        hdr = ctk.CTkFrame(self, fg_color="#181A24", corner_radius=0, height=60)
+    def _build_ui(self, current_path: str):
+        hdr = ctk.CTkFrame(self, fg_color="#181A24", corner_radius=0, height=55)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
         ctk.CTkLabel(
             hdr, text="⚙️  Pengaturan",
             font=ctk.CTkFont(family="Inter", size=16, weight="bold"),
             text_color="#F3F4F6"
-        ).pack(side="left", padx=20, pady=0)
+        ).pack(side="left", padx=20)
 
-        # Body
-        body = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=16, pady=12)
+        body = ctk.CTkFrame(self, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=20, pady=16)
 
-        # ── Section: Gemini AI ──────────────────────────────────────────────
-        sec_ai = ctk.CTkFrame(body, fg_color="#181A24", corner_radius=12)
-        sec_ai.pack(fill="x", pady=(0, 12))
-        inner_ai = ctk.CTkFrame(sec_ai, fg_color="transparent")
-        inner_ai.pack(fill="x", padx=16, pady=14)
+        sec_dir = ctk.CTkFrame(body, fg_color="#181A24", corner_radius=12)
+        sec_dir.pack(fill="x", pady=(0, 16))
+        inner_dir = ctk.CTkFrame(sec_dir, fg_color="transparent")
+        inner_dir.pack(fill="x", padx=16, pady=14)
 
-        # Title
-        ai_title_row = ctk.CTkFrame(inner_ai, fg_color="transparent")
-        ai_title_row.pack(fill="x", pady=(0, 4))
         ctk.CTkLabel(
-            ai_title_row, text="🤖  Gemini AI API Key",
+            inner_dir, text="📁  Folder Output Unduhan Default",
             font=ctk.CTkFont(size=13, weight="bold"), text_color="#F3F4F6"
+        ).pack(anchor="w", pady=(0, 8))
+
+        dir_row = ctk.CTkFrame(inner_dir, fg_color="transparent")
+        dir_row.pack(fill="x")
+
+        self.path_var = ctk.StringVar(value=current_path)
+        self.path_entry = ctk.CTkEntry(
+            dir_row, textvariable=self.path_var,
+            height=36, corner_radius=8,
+            border_color="#2D3142", fg_color="#10111A", text_color="#F3F4F6"
+        )
+        self.path_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+        ctk.CTkButton(
+            dir_row, text="Pilih Folder", width=90, height=36,
+            fg_color="#26293B", hover_color="#31354C",
+            command=self._browse_folder
         ).pack(side="left")
 
-        badge = ctk.CTkFrame(ai_title_row, fg_color="#1E1B4B", corner_radius=6)
-        badge.pack(side="left", padx=8)
-        ctk.CTkLabel(
-            badge, text="google-genai", font=ctk.CTkFont(size=10),
-            text_color="#A5B4FC"
-        ).pack(padx=6, pady=2)
-
-        ctk.CTkLabel(
-            inner_ai,
-            text="Dapatkan API Key gratis di:  aistudio.google.com",
-            font=ctk.CTkFont(size=11), text_color="#6B7280"
-        ).pack(anchor="w", pady=(0, 10))
-
-        # API Key entry row
-        key_row = ctk.CTkFrame(inner_ai, fg_color="transparent")
-        key_row.pack(fill="x", pady=(0, 8))
-
-        self._show_key = False
-        self.api_key_var = ctk.StringVar(value=current_api_key)
-        self.api_entry = ctk.CTkEntry(
-            key_row, textvariable=self.api_key_var,
-            placeholder_text="AIzaSy...",
-            show="•", height=38, corner_radius=8,
-            border_color="#2D3142", fg_color="#10111A",
-            text_color="#F3F4F6", placeholder_text_color="#6B7280",
-            font=ctk.CTkFont(size=12)
-        )
-        self.api_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
-
-        self.toggle_eye_btn = ctk.CTkButton(
-            key_row, text="👁", width=38, height=38,
-            fg_color="#26293B", hover_color="#31354C",
-            font=ctk.CTkFont(size=14),
-            command=self._toggle_key_visibility
-        )
-        self.toggle_eye_btn.pack(side="left")
-
-        # Test connection row
-        test_row = ctk.CTkFrame(inner_ai, fg_color="transparent")
-        test_row.pack(fill="x", pady=(0, 4))
-        self.test_btn = ctk.CTkButton(
-            test_row, text="🔌 Test Koneksi",
-            command=self._test_connection,
-            height=32, corner_radius=8,
-            fg_color="#26293B", hover_color="#31354C",
-            font=ctk.CTkFont(size=12)
-        )
-        self.test_btn.pack(side="left")
-        self.test_result_lbl = ctk.CTkLabel(
-            test_row, textvariable=self._test_result_var,
-            font=ctk.CTkFont(size=11), text_color="#9CA3AF",
-            wraplength=260
-        )
-        self.test_result_lbl.pack(side="left", padx=(10, 0))
-
-        # Save button
-        ctk.CTkFrame(body, height=1, fg_color="#26293B").pack(fill="x", pady=(4, 12))
         ctk.CTkButton(
             body, text="💾  Simpan Pengaturan",
             command=self._save,
             height=42, corner_radius=10,
             fg_color="#4F46E5", hover_color="#4338CA",
             font=ctk.CTkFont(size=13, weight="bold")
-        ).pack(fill="x")
+        ).pack(fill="x", side="bottom")
 
-    def _toggle_key_visibility(self):
-        self._show_key = not self._show_key
-        self.api_entry.configure(show="" if self._show_key else "•")
-
-    def _test_connection(self):
-        self.test_btn.configure(state="disabled", text="⏳ Menghubungi AI...")
-        self._test_result_var.set("")
-        key = self.api_key_var.get().strip()
-
-        def cb(success, msg):
-            if not self.winfo_exists():
-                return
-            self._test_result_var.set(msg)
-            self.test_result_lbl.configure(
-                text_color="#10B981" if success else "#EF4444"
-            )
-            self.test_btn.configure(state="normal", text="🔌 Test Koneksi")
-
-        test_api_connection(key, lambda s, m: self.after(0, lambda: cb(s, m)))
+    def _browse_folder(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self.path_var.set(folder)
 
     def _save(self):
-        api_key = self.api_key_var.get().strip()
+        path = self.path_var.get().strip()
         if self.on_save_callback:
-            self.on_save_callback(api_key)
+            self.on_save_callback(path)
         try:
             self.grab_release()
         except Exception:
@@ -275,7 +208,6 @@ class App(ctk.CTk):
         self.download_playlist_var = ctk.BooleanVar(value=False)
 
         # ── App state ────────────────────────────────────────────────────────
-        self.gemini_api_key: str = load_gemini_api_key()
         self.last_video_info: dict = {}
         self._last_log_text: str = ""
         self._settings_window = None
@@ -357,18 +289,13 @@ class App(ctk.CTk):
                     self.right_tabview.set(TAB_LOG)
 
                 elif msg_type == "download_error":
-                    # Tampilkan tombol AI Error Analyzer
-                    self._show_ai_error_button()
-                    self.show_toast("Unduhan gagal. Gunakan 🤖 Analisis Error untuk bantuan.", "error")
+                    self.show_toast("Unduhan gagal. Periksa tab 📜 Log untuk detail error.", "error")
 
                 elif msg_type == "update_finish":
                     self.update_button.configure(state="normal")
                     self.progress_bar.set(1.0)
                     self.progress_label.configure(text="Status: Update Selesai ✨")
                     self.show_toast("yt-dlp berhasil diperbarui!", "success")
-
-                elif msg_type == "ai_result":
-                    self._on_ai_result(msg)
 
         except queue.Empty:
             pass
@@ -593,59 +520,6 @@ class App(ctk.CTk):
         # Quality badges row (always packed inside container; children rebuilt each time)
         self.badges_frame = ctk.CTkFrame(self._info_container, fg_color="transparent")
         self.badges_frame.pack(fill="x", pady=(0, 4))
-
-        # ── Contextual AI Panel ────────────────────────────────────────────
-        self.ai_panel = ctk.CTkFrame(self._info_container, fg_color="#0D0F1C", corner_radius=10)
-        self.ai_panel.pack(fill="x", pady=(0, 8))
-
-        ai_hdr = ctk.CTkFrame(self.ai_panel, fg_color="transparent")
-        ai_hdr.pack(fill="x", padx=10, pady=(8, 4))
-        ctk.CTkLabel(
-            ai_hdr, text="🤖 Maven AI",
-            font=ctk.CTkFont(size=11, weight="bold"), text_color="#818CF8"
-        ).pack(side="left")
-
-        ai_btn_row = ctk.CTkFrame(self.ai_panel, fg_color="transparent")
-        ai_btn_row.pack(fill="x", padx=10, pady=(0, 6))
-
-        self.ai_metadata_btn = ctk.CTkButton(
-            ai_btn_row, text="🏷️ AI Metadata",
-            command=self.on_ai_metadata,
-            height=28, corner_radius=6,
-            fg_color="#1E1B4B", hover_color="#2D2A6E",
-            text_color="#A5B4FC", font=ctk.CTkFont(size=11),
-            state="disabled"  # enabled after first successful Cek Info
-        )
-        self.ai_metadata_btn.pack(side="left", padx=(0, 6))
-
-        self.ai_settings_btn = ctk.CTkButton(
-            ai_btn_row, text="⚙️ AI Settings",
-            command=self.on_ai_recommend_settings,
-            height=28, corner_radius=6,
-            fg_color="#1E1B4B", hover_color="#2D2A6E",
-            text_color="#A5B4FC", font=ctk.CTkFont(size=11),
-            state="disabled"  # enabled after first successful Cek Info
-        )
-        self.ai_settings_btn.pack(side="left", padx=(0, 6))
-
-        self.ai_error_btn = ctk.CTkButton(
-            ai_btn_row, text="🔍 Analisis Error",
-            command=self.on_analyze_error,
-            height=28, corner_radius=6,
-            fg_color="#3B1515", hover_color="#5B2525",
-            text_color="#FCA5A5", font=ctk.CTkFont(size=11)
-        )
-        # ai_error_btn: never packed until download_error event fires
-
-        # AI result text area — packed only when showing a result
-        self.ai_result_text = ctk.CTkTextbox(
-            self.ai_panel,
-            height=110, font=ctk.CTkFont(family="Consolas", size=10),
-            fg_color="#080910", text_color="#C4B5FD",
-            border_color="#1E1B4B", border_width=1, corner_radius=6,
-            wrap="word"
-        )
-        # ai_result_text starts hidden; shown via _show_ai_result()
 
         # ── Progress Section ─────────────────────────────────────────────
         prog_card = ctk.CTkFrame(pi, fg_color="#0E0F17", corner_radius=10)
@@ -1048,189 +922,6 @@ class App(ctk.CTk):
             self._info_container.pack(fill="x", pady=(0, 4))
             self._info_container_shown = True
 
-        # Enable AI buttons
-        self.ai_metadata_btn.configure(state="normal")
-        self.ai_settings_btn.configure(state="normal")
-
-        # Show API key hint if not configured
-        if not self.gemini_api_key:
-            self._show_ai_result(
-                "ℹ️ API Key belum diatur.\nBuka ⚙️ Pengaturan untuk memasukkan Gemini API Key\nagar fitur AI dapat digunakan.",
-                color="#6B7280"
-            )
-
-    # =========================================================================
-    # AI Feature Handlers
-    # =========================================================================
-    def on_ai_metadata(self):
-        if not self._check_api_key():
-            return
-        title = self.last_video_info.get('title', '')
-        if not title:
-            self.show_toast("Lakukan Cek Info terlebih dahulu.", "warning")
-            return
-        uploader = (self.last_video_info.get('uploader')
-                    or self.last_video_info.get('channel', ''))
-        self.ai_metadata_btn.configure(text="⏳ Memproses...", state="disabled")
-        self.ai_settings_btn.configure(state="disabled")
-        self._show_ai_result("🤖 Maven AI sedang menganalisis metadata lagu...", color="#818CF8")
-
-        def cb(result):
-            ui_queue.put({"type": "ai_result", "result_type": "metadata", "data": result})
-
-        clean_media_metadata(title, uploader, self.gemini_api_key, cb)
-
-    def on_ai_recommend_settings(self):
-        if not self._check_api_key():
-            return
-        if not self.last_video_info:
-            self.show_toast("Lakukan Cek Info terlebih dahulu.", "warning")
-            return
-        self.ai_settings_btn.configure(text="⏳ Memproses...", state="disabled")
-        self.ai_metadata_btn.configure(state="disabled")
-        self._show_ai_result("🤖 Maven AI sedang menganalisis video dan menyiapkan rekomendasi...", color="#818CF8")
-
-        def cb(result):
-            ui_queue.put({"type": "ai_result", "result_type": "settings", "data": result})
-
-        recommend_download_settings(self.last_video_info, self.gemini_api_key, cb)
-
-    def on_analyze_error(self):
-        if not self._check_api_key():
-            return
-        log_text = self._last_log_text
-        if not log_text.strip():
-            self.show_toast("Tidak ada log error untuk dianalisis.", "warning")
-            return
-        self.ai_error_btn.configure(text="⏳ Menganalisis...", state="disabled")
-        self._show_ai_result("🤖 Maven AI sedang membaca log dan menganalisis error...", color="#818CF8")
-        # Switch to Log tab so user can see context
-        self.right_tabview.set(TAB_LOG)
-
-        def cb(result):
-            ui_queue.put({"type": "ai_result", "result_type": "error_analysis", "data": result})
-
-        analyze_download_error(log_text, self.gemini_api_key, cb)
-
-    def _on_ai_result(self, msg: dict):
-        """Handle AI result messages dari ui_queue."""
-        result_type = msg.get("result_type")
-        data = msg.get("data")
-
-        # Re-enable buttons
-        self.ai_metadata_btn.configure(text="🏷️ AI Metadata", state="normal")
-        self.ai_settings_btn.configure(text="⚙️ AI Settings", state="normal")
-        self.ai_error_btn.configure(text="🔍 Analisis Error", state="normal")
-
-        if result_type == "metadata":
-            if isinstance(data, dict) and "error" in data:
-                self._show_ai_result(f"❌ {data['error']}", color="#EF4444")
-            elif isinstance(data, dict) and data.get("not_music"):
-                self._show_ai_result(
-                    f"ℹ️ Bukan video musik.\n{data.get('reason', '')}",
-                    color="#6B7280"
-                )
-            else:
-                confidence_color = {
-                    "high": "✅", "medium": "⚠️", "low": "❓"
-                }.get(str(data.get('confidence', '')).lower(), "🔍")
-                text = (
-                    f"🎵 AI Metadata Result:\n"
-                    f"━━━━━━━━━━━━━━━━━\n"
-                    f"🎵 Judul  : {data.get('song_title', '-')}\n"
-                    f"👤 Artis  : {data.get('artist', '-')}\n"
-                    f"📀 Album  : {data.get('album', '-') or '—'}\n"
-                    f"🏷️ Genre  : {data.get('genre', '-')}\n"
-                    f"📅 Tahun  : {data.get('year', '-') or '—'}\n"
-                    f"🎯 Akurasi: {confidence_color} {str(data.get('confidence', '-')).upper()}"
-                )
-                self._show_ai_result(text, color="#C4B5FD")
-                self.show_toast("✅ Metadata AI berhasil dianalisis!", "success")
-
-        elif result_type == "settings":
-            if isinstance(data, dict) and "error" in data:
-                self._show_ai_result(f"❌ {data['error']}", color="#EF4444")
-            else:
-                reasoning = data.get('reasoning', 'Pengaturan optimal telah dipilih.')
-                text = f"⚙️ AI Rekomendasi Setting:\n━━━━━━━━━━━━━━━━━\n{reasoning}"
-                self._show_ai_result(text, color="#A5F3FC")
-                # Apply recommended settings to UI widgets
-                self.apply_ai_settings(data)
-                self.show_toast("⚙️ Setting otomatis diterapkan!", "info")
-
-        elif result_type == "error_analysis":
-            self._show_ai_result(
-                data if isinstance(data, str) else str(data),
-                color="#FCA5A5"
-            )
-
-    def apply_ai_settings(self, data: dict):
-        """Terapkan rekomendasi setting dari AI ke widget UI."""
-        mode = data.get("mode", "")
-        if mode == "audio_only":
-            self.mode_var.set("audio_only")
-            self.mode_segmented.set("Audio Only")
-            af = data.get("audio_format", "mp3").upper()
-            if af in ["MP3", "M4A", "FLAC", "WAV", "OPUS"]:
-                self.audio_fmt_segmented.set(af)
-                self.audio_only_format_var.set(af.lower())
-        elif mode == "video_audio":
-            self.mode_var.set("video_audio")
-            self.mode_segmented.set("Video + Audio")
-            container = data.get("container", "mp4").upper()
-            if container in ["MP4", "MKV", "WEBM", "MOV", "AVI"]:
-                self.video_fmt_segmented.set(container)
-                self.container_var.set(container.lower())
-            # Resolution
-            res = str(data.get("resolution", "1080"))
-            res_map_rev = {
-                "best": "Best", "2160": "4K", "1440": "1440p",
-                "1080": "1080p", "720": "720p", "480": "480p", "360": "360p"
-            }
-            r_label = res_map_rev.get(res, "1080p")
-            self.res_segmented.set(r_label)
-            self.resolution_var.set(res)
-            # Video codec
-            vc = data.get("video_codec", "best")
-            vc_label_map = {"best": "Auto", "h264": "H.264", "vp9": "VP9", "av1": "AV1"}
-            self.v_codec_segmented.set(vc_label_map.get(vc, "Auto"))
-            self.video_codec_var.set(vc)
-            # Audio codec
-            ac = data.get("audio_codec", "best")
-            ac_label_map = {"best": "Auto", "m4a": "M4A", "opus": "Opus"}
-            self.a_codec_segmented.set(ac_label_map.get(ac, "Auto"))
-            self.audio_codec_var.set(ac)
-        # Embed thumb
-        if "embed_thumb" in data:
-            self.embed_thumb_var.set(bool(data["embed_thumb"]))
-        self.toggle_opts()
-
-    def _show_ai_result(self, text: str, color: str = "#C4B5FD"):
-        """Tampilkan teks hasil AI di area bawah panel AI."""
-        self.ai_result_text.configure(text_color=color)
-        self.ai_result_text.delete("1.0", "end")
-        self.ai_result_text.insert("end", text)
-        # Only pack if not already in layout
-        if not self.ai_result_text.winfo_ismapped():
-            self.ai_result_text.pack(fill="x", padx=10, pady=(0, 8))
-
-    def _show_ai_error_button(self):
-        """Tampilkan tombol 🔍 Analisis Error di panel AI (setelah download gagal)."""
-        # Make sure info container is visible (even if Cek Info was never pressed)
-        if not self._info_container_shown:
-            self._info_container.pack(fill="x", pady=(0, 4))
-            self._info_container_shown = True
-        # Pack the error button if not already shown
-        if not self.ai_error_btn.winfo_ismapped():
-            self.ai_error_btn.pack(side="left", padx=(0, 6))
-
-    def _check_api_key(self) -> bool:
-        if not self.gemini_api_key:
-            self.show_toast("Atur Gemini API Key di ⚙️ Pengaturan terlebih dahulu.", "warning")
-            self.open_settings()
-            return False
-        return True
-
     # =========================================================================
     # Batch Queue Tab Actions
     # =========================================================================
@@ -1514,6 +1205,22 @@ class App(ctk.CTk):
                 os.startfile(path)
             else:
                 subprocess.Popen(["xdg-open", path])
+
+    def open_settings(self):
+        if self._settings_window and self._settings_window.winfo_exists():
+            self._settings_window.focus()
+            return
+        self._settings_window = SettingsWindow(
+            self,
+            current_path=self.custom_output_path_var.get(),
+            on_save=self._on_settings_save
+        )
+
+    def _on_settings_save(self, path: str):
+        if path:
+            self.custom_output_path_var.set(path)
+            save_config(path=path)
+            self.show_toast("✅ Folder output tersimpan!", "success")
 
     def _set_thumb_label(self, ctk_image=None, text=""):
         """Helper aman untuk update thumbnail tanpa error Tcl pyimage dangling."""

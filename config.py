@@ -34,11 +34,9 @@ def _write_raw_config(data: dict):
     except Exception as e:
         print(f"ERROR saving config: {e}")
 
-def save_config(path: str = None, api_key: str = None):
+def save_config(path: str = None):
     """
-    Simpan satu atau lebih field config tanpa menimpa field lainnya.
-    - path: folder output unduhan
-    - api_key: Gemini AI API key
+    Simpan folder output unduhan ke config file.
     """
     data = _read_raw_config()
     if path is not None:
@@ -48,8 +46,6 @@ def save_config(path: str = None, api_key: str = None):
                 os.makedirs(path, exist_ok=True)
             except Exception:
                 pass
-    if api_key is not None:
-        data["gemini_api_key"] = api_key
     _write_raw_config(data)
 
 def load_config() -> str:
@@ -61,7 +57,3 @@ def load_config() -> str:
     if saved_path and os.path.isdir(saved_path):
         return saved_path
     return DEFAULT_OUTPUT_DIR
-
-def load_gemini_api_key() -> str:
-    """Kembalikan Gemini API key yang tersimpan."""
-    return _read_raw_config().get("gemini_api_key", "")
