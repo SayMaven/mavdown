@@ -16,25 +16,52 @@ NODE_PATH = os.path.join(BASE_DIR, "bin", "node.exe")
 DEFAULT_OUTPUT_DIR = os.path.join(BASE_DIR, "downloads")
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 
-def save_config(path):
-    try:
-        if not os.path.exists(path):
-            os.makedirs(path, exist_ok=True)
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump({"output_path": path}, f)
-    except Exception as e:
-        print(f"ERROR saving config: {e}")
-
-def load_config():
-    if not os.path.exists(DEFAULT_OUTPUT_DIR):
-        os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)
+def _read_raw_config() -> dict:
+    """Baca config dict mentah dari file."""
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                saved_path = config.get('output_path', DEFAULT_OUTPUT_DIR)
-                if saved_path and os.path.isdir(saved_path):
-                    return saved_path
+                return json.load(f)
         except Exception:
             pass
+    return {}
+
+def _write_raw_config(data: dict):
+    """Tulis config dict ke file."""
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"ERROR saving config: {e}")
+
+def save_config(path: str = None, api_key: str = None):
+    """
+    Simpan satu atau lebih field config tanpa menimpa field lainnya.
+    - path: folder output unduhan
+    - api_key: Gemini AI API key
+    """
+    data = _read_raw_config()
+    if path is not None:
+        data["output_path"] = path
+        if path and not os.path.exists(path):
+            try:
+                os.makedirs(path, exist_ok=True)
+            except Exception:
+                pass
+    if api_key is not None:
+        data["gemini_api_key"] = api_key
+    _write_raw_config(data)
+
+def load_config() -> str:
+    """Kembalikan path output yang tersimpan (backward-compatible)."""
+    if not os.path.exists(DEFAULT_OUTPUT_DIR):
+        os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)
+    data = _read_raw_config()
+    saved_path = data.get("output_path", DEFAULT_OUTPUT_DIR)
+    if saved_path and os.path.isdir(saved_path):
+        return saved_path
     return DEFAULT_OUTPUT_DIR
+
+def load_gemini_api_key() -> str:
+    """Kembalikan Gemini API key yang tersimpan."""
+    return _read_raw_config().get("gemini_api_key", "")

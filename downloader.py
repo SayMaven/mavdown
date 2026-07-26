@@ -41,16 +41,40 @@ def create_yt_dlp_command(url, options=[]):
     return command
 
 def update_progress_bar(line):
-    match_yt = re.search(r'\[download\]\s+(\d+\.\d+)%', line)
-    match_aria = re.search(r'\((\d+(?:\.\d+)?)%\)', line)
-    
+    progress_data = {"type": "progress"}
+
+    # Persen unduhan
+    match_yt = re.search(r'\[download\]\s+([\d.]+)%', line)
+    match_aria = re.search(r'\(([\d.]+)%\)', line)
     if match_yt:
         percent = float(match_yt.group(1))
-        ui_queue.put({"type": "progress", "value": percent / 100.0, "text": f"Progress: {percent:.1f}%"})
+        progress_data["value"] = percent / 100.0
+        progress_data["text"] = f"Status: {percent:.1f}%"
     elif match_aria:
         percent = float(match_aria.group(1))
-        ui_queue.put({"type": "progress", "value": percent / 100.0, "text": f"Progress: {percent:.1f}%"})
-        
+        progress_data["value"] = percent / 100.0
+        progress_data["text"] = f"Status: {percent:.1f}%"
+
+    # Kecepatan unduhan (contoh: 8.50MiB/s)
+    match_speed = re.search(r'at\s+([\d.]+\s*[KMGTk]i?B/s)', line)
+    if match_speed:
+        progress_data["speed"] = match_speed.group(1).strip()
+
+    # ETA (contoh: ETA 00:35)
+    match_eta = re.search(r'ETA\s+([\d:]+)', line)
+    if match_eta:
+        progress_data["eta"] = match_eta.group(1).strip()
+
+    # Ukuran terunduh / total (contoh: 45.20MiB of 120.50MiB)
+    match_size = re.search(r'([\d.]+\s*[KMGTk]i?B)\s+of\s+([\d.]+\s*[KMGTk]i?B)', line)
+    if match_size:
+        progress_data["size_dl"] = match_size.group(1).strip()
+        progress_data["size_total"] = match_size.group(2).strip()
+
+    # Kirim jika ada data progress yang relevan
+    if len(progress_data) > 1:
+        ui_queue.put(progress_data)
+
     ui_queue.put({"type": "log", "text": line})
 
 def get_video_info(url):
@@ -65,7 +89,10 @@ def get_video_info(url):
         ui_queue.put({"type": "info_title", "title": "Mengambil Info..."})
         ui_queue.put({"type": "info_thumb", "text": "Mengambil Thumbnail...", "image": None})
         
-        result = subprocess.run(info_command, capture_output=True, text=True, check=True, timeout=30, startupinfo=startupinfo)
+        result = subprocess.run(
+            info_command, capture_output=True, text=True, check=True,
+            timeout=30, startupinfo=startupinfo, encoding='utf-8', errors='ignore'
+        )
         stdout_text = result.stdout.strip()
         if not stdout_text:
             raise Exception("Respons info video kosong.")
@@ -74,7 +101,10 @@ def get_video_info(url):
         info = json.loads(first_line)
         title = info.get('title', 'Judul Tidak Ditemukan')
         ui_queue.put({"type": "info_title", "title": f"Judul: {title}"})
-        
+
+        # Kirim full info dict untuk fitur AI & metadata card
+        ui_queue.put({"type": "info_data", "data": info})
+
         thumb_url = info.get('thumbnail')
         if thumb_url and thumb_url.startswith('http'):
             image_data = requests.get(thumb_url, timeout=10).content
@@ -125,6 +155,259 @@ def convert_srt_file_to_lrc(srt_path, lrc_path):
         pass
     return False
 
+def expand_sub_langs(subs_lang_str: str) -> str:
+    """
+    Ekspansi bahasa subtitle agar mencakup varian bahasa resmi & auto-caption
+    (seperti en, en-US, en-GB, en-orig, en-nP7...) tanpa mencocokkan terjemahan ke bahasa lain (seperti en-zh, en-de, id-zh).
+    """
+    if not subs_lang_str:
+        return "id,id-ID,id-orig,id-id,id-nP7.*,en,en-US,en-GB,en-orig,en-en,en-nP7.*"
+    raw = subs_lang_str.strip().lower()
+    if raw in ("all", ".*"):
+        return "all"
+    
+    tokens = [t.strip() for t in subs_lang_str.split(",") if t.strip()]
+    expanded = []
+    for t in tokens:
+        expanded.append(t)
+        t_clean = t.split('-')[0].lower()
+        if t_clean == "en":
+            expanded.extend(["en-US", "en-GB", "en-orig", "en-en", "en-nP7.*"])
+        elif t_clean == "id":
+            expanded.extend(["id-ID", "id-orig", "id-id", "id-nP7.*"])
+        elif t_clean == "ja":
+            expanded.extend(["ja-JP", "ja-orig", "ja-ja", "ja-nP7.*"])
+        elif t_clean == "zh":
+            expanded.extend(["zh-Hans", "zh-Hant", "zh-CN", "zh-TW", "zh-HK", "zh-orig", "zh-nP7.*"])
+        elif t_clean == "ko":
+            expanded.extend(["ko-KR", "ko-orig", "ko-ko", "ko-nP7.*"])
+        elif t_clean == "es":
+            expanded.extend(["es-ES", "es-419", "es-orig", "es-nP7.*"])
+        else:
+            expanded.extend([f"{t_clean}-{t_clean}", f"{t_clean}-orig", f"{t_clean}-nP7.*"])
+            
+    seen = set()
+    res = []
+    for item in expanded:
+        if item not in seen:
+            seen.add(item)
+            res.append(item)
+    return ",".join(res)
+
+def process_downloaded_subtitles(output_dir: str, download_start_time: float, is_audio_only: bool, embed_subs: bool, download_subs: bool):
+    """
+    Deduplikasi & pembersihan subtitle setelah unduhan selesai:
+    1. Mengumpulkan semua file subtitle (.srt, .vtt, .ass, .lrc, .ttml) yang baru diunduh.
+    2. Membedakan antara subtitle manual buatan pembuat video vs subtitle otomatis YouTube.
+    3. Jika subtitle manual ada, prioritaskan subtitle manual & hapus subtitle otomatis yang duplikat.
+    4. Jika hanya ada subtitle otomatis, ubah namanya jadi bersih (contoh: Video.id.srt).
+    5. Jika mode audio_only, konversi subtitle terbaik ke .lrc dan hapus sisanya.
+    6. Jika embed_subs aktif di mode video: Embed Softsub ke track P0 (Default Active) via FFmpeg.
+       Subtitle akan LANGSUNG TAMPIL saat video dijalankan, namun TETAP BISA DIMATIKAN/ON-OFF di player!
+       Jika download_subs tidak dicentang, hapus file subtitle luar setelah embed selesai.
+    """
+    try:
+        sub_files = []
+        video_files = []
+
+        for item in os.listdir(output_dir):
+            file_path = os.path.join(output_dir, item)
+            if not os.path.isfile(file_path):
+                continue
+            try:
+                if os.path.getmtime(file_path) < download_start_time:
+                    continue
+            except Exception:
+                pass
+            
+            item_lower = item.lower()
+            if item_lower.endswith(('.srt', '.vtt', '.ass', '.lrc', '.ttml')):
+                sub_files.append(item)
+            elif item_lower.endswith(('.mp4', '.mkv', '.webm', '.mov', '.avi')):
+                video_files.append(item)
+
+        if not sub_files:
+            return
+
+        groups = {}
+
+        for item in sub_files:
+            parts = item.rsplit('.', 2)
+            if len(parts) == 3:
+                title, lang_tag, ext = parts[0], parts[1], parts[2]
+            else:
+                title, ext = os.path.splitext(item)
+                title = title.lstrip('.')
+                lang_tag = ""
+                ext = ext.lstrip('.')
+            
+            lang_lower = lang_tag.lower()
+            is_auto = False
+            if 'np7' in lang_lower or 'srv' in lang_lower or len(lang_lower.split('-')) > 2:
+                is_auto = True
+            elif '-' in lang_lower:
+                subparts = lang_lower.split('-')
+                if len(subparts) == 2 and subparts[0] == subparts[1]:
+                    is_auto = True
+            
+            if '-' in lang_tag and not is_auto and len(lang_tag) <= 6:
+                base_lang = lang_tag
+            else:
+                base_lang = lang_tag.split('-')[0] if lang_tag else "default"
+
+            key = (title, base_lang)
+            if key not in groups:
+                groups[key] = []
+            groups[key].append((item, is_auto, lang_tag, ext))
+
+        selected_sub_paths = []
+
+        for (title, base_lang), items in groups.items():
+            manual_subs = [x for x in items if not x[1]]
+            auto_subs = [x for x in items if x[1]]
+
+            if is_audio_only:
+                best_sub = manual_subs[0] if manual_subs else auto_subs[0]
+                best_file = best_sub[0]
+                best_path = os.path.join(output_dir, best_file)
+                target_lrc_path = os.path.join(output_dir, f"{title}.lrc")
+
+                if best_file.lower().endswith('.lrc'):
+                    if best_path != target_lrc_path and os.path.exists(best_path):
+                        try:
+                            if os.path.exists(target_lrc_path):
+                                os.remove(target_lrc_path)
+                            os.rename(best_path, target_lrc_path)
+                        except Exception:
+                            pass
+                else:
+                    convert_srt_file_to_lrc(best_path, target_lrc_path)
+
+                for x in items:
+                    fp = os.path.join(output_dir, x[0])
+                    if fp != target_lrc_path and os.path.exists(fp):
+                        try:
+                            os.remove(fp)
+                        except Exception:
+                            pass
+                ui_queue.put({"type": "log", "text": f"[LIRIK] Subtitle terbaik disimpan sebagai lirik -> '{title}.lrc'\n"})
+
+            else:
+                if manual_subs:
+                    best_manual = manual_subs[0]
+                    for x in auto_subs:
+                        fp = os.path.join(output_dir, x[0])
+                        if os.path.exists(fp):
+                            try:
+                                os.remove(fp)
+                            except Exception:
+                                pass
+                    for x in manual_subs[1:]:
+                        fp = os.path.join(output_dir, x[0])
+                        if os.path.exists(fp):
+                            try:
+                                os.remove(fp)
+                            except Exception:
+                                pass
+                    selected_sub_paths.append(best_manual[0])
+                    ui_queue.put({"type": "log", "text": f"[SUBTITLE] Menggunakan subtitle manual asli -> '{best_manual[0]}'\n"})
+                elif auto_subs:
+                    best_auto = auto_subs[0]
+                    best_auto_path = os.path.join(output_dir, best_auto[0])
+                    target_clean_name = f"{title}.{base_lang}.{best_auto[3]}"
+                    target_clean_path = os.path.join(output_dir, target_clean_name)
+
+                    for x in auto_subs[1:]:
+                        fp = os.path.join(output_dir, x[0])
+                        if os.path.exists(fp):
+                            try:
+                                os.remove(fp)
+                            except Exception:
+                                pass
+
+                    if best_auto_path != target_clean_path:
+                        try:
+                            if os.path.exists(target_clean_path):
+                                os.remove(target_clean_path)
+                            os.rename(best_auto_path, target_clean_path)
+                            ui_queue.put({"type": "log", "text": f"[SUBTITLE] Subtitle otomatis dirapikan -> '{target_clean_name}'\n"})
+                            selected_sub_paths.append(target_clean_name)
+                        except Exception:
+                            selected_sub_paths.append(best_auto[0])
+                    else:
+                        selected_sub_paths.append(best_auto[0])
+
+        # ── FFmpeg Softsub Embedding (Track P0 - Default Active & ON/OFF) ───
+        if embed_subs and not is_audio_only and video_files and selected_sub_paths:
+            v_file = video_files[0]
+            s_file = selected_sub_paths[0]
+            v_path = os.path.join(output_dir, v_file)
+            s_path = os.path.join(output_dir, s_file)
+
+            if os.path.exists(v_path) and os.path.exists(s_path):
+                ui_queue.put({"type": "log", "text": f"\n[EMBED SUB] Meng-embed '{s_file}' sebagai Softsub P0 (Default Aktif & Bisa ON/OFF)...\n"})
+                base_vid, v_ext = os.path.splitext(v_file)
+                temp_embed_file = f"{base_vid}_embed{v_ext}"
+
+                # Tentukan codec & bahasa ISO 639-2 untuk metadata stream MP4/MKV
+                sub_codec = "mov_text" if v_ext.lower() in (".mp4", ".mov", ".m4v") else "srt"
+                
+                parts_s = s_file.rsplit('.', 2)
+                lang_code = parts_s[1].split('-')[0].lower() if len(parts_s) == 3 else "en"
+                iso3_map = {"id": "ind", "en": "eng", "ja": "jpn", "zh": "zho", "ko": "kor", "es": "spa", "fr": "fra", "de": "deu", "ru": "rus"}
+                lang_iso3 = iso3_map.get(lang_code, "eng")
+
+                ff_cmd = [
+                    FFMPEG_PATH, "-y",
+                    "-i", v_file,
+                    "-i", s_file,
+                    "-map", "0:v",
+                    "-map", "0:a?",
+                    "-map", "0:t?",
+                    "-map", "1:0",
+                    "-c:v", "copy",
+                    "-c:a", "copy",
+                    "-c:s", sub_codec,
+                    "-disposition:s:0", "default+forced",
+                    "-metadata:s:s:0", f"language={lang_iso3}",
+                    "-metadata:s:s:0", f"title={lang_code.upper()}",
+                    temp_embed_file
+                ]
+                
+                startupinfo = None
+                if os.name == 'nt':
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    startupinfo.wShowWindow = subprocess.SW_HIDE
+
+                res = subprocess.run(
+                    ff_cmd, cwd=output_dir, capture_output=True, text=True,
+                    startupinfo=startupinfo, encoding='utf-8', errors='ignore'
+                )
+                
+                temp_embed_path = os.path.join(output_dir, temp_embed_file)
+                if res.returncode == 0 and os.path.exists(temp_embed_path):
+                    try:
+                        os.remove(v_path)
+                        os.rename(temp_embed_path, v_path)
+                        ui_queue.put({"type": "log", "text": f"[EMBED SUB] ✨ Subtitle berhasil di-embed ke track P0! Langsung aktif saat diputar & tetap bisa di-OFF kan.\n"})
+                    except Exception as e:
+                        ui_queue.put({"type": "log", "text": f"[EMBED ERROR] Gagal mengganti file: {e}\n"})
+                else:
+                    ui_queue.put({"type": "log", "text": f"[EMBED ERROR] FFmpeg gagal embed subtitle.\n"})
+
+            if not download_subs:
+                for sf in selected_sub_paths:
+                    sp = os.path.join(output_dir, sf)
+                    if os.path.exists(sp):
+                        try:
+                            os.remove(sp)
+                        except Exception:
+                            pass
+
+    except Exception as e:
+        print(f"Error in process_downloaded_subtitles: {e}")
+
 def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container, download_subs, embed_subs, subs_lang, embed_thumb, use_aria2, download_playlist, custom_path, custom_cmd):
     global current_process
     output_dir = custom_path if custom_path else DEFAULT_OUTPUT_DIR
@@ -137,7 +420,7 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
     ui_queue.put({"type": "log", "text": f"URL Sumber: {url}\n"}) 
     ui_queue.put({"type": "log", "text": f"Memulai Unduhan Baru Ke: {output_dir}\n"})
     
-    options = ["--retries", "infinite", "--fragment-retries", "infinite", "--js-runtimes", f"node:{NODE_PATH}"]
+    options = ["--ignore-errors", "--retries", "infinite", "--fragment-retries", "infinite", "--js-runtimes", f"node:{NODE_PATH}"]
     options.append(f"--ffmpeg-location={FFMPEG_PATH}")
     
     if not download_playlist:
@@ -210,17 +493,17 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
             
         if download_subs or embed_subs:
             lang = subs_lang.strip() if subs_lang.strip() else "id,en"
+            effective_lang = expand_sub_langs(lang)
             if mode == "audio_only":
-                options.extend(["--write-subs", "--write-auto-subs", "--sub-langs", lang, "--convert-subs", "srt"])
+                options.extend(["--write-subs", "--write-auto-subs", "--sub-langs", effective_lang, "--convert-subs", "srt"])
                 if embed_subs and not download_subs:
                     ui_queue.put({"type": "log", "text": f"[OPT] Mode Audio Saja: Lirik lagu ({lang}) otomatis dibuat sebagai file .lrc di sebelah audio.\n"})
                 else:
                     ui_queue.put({"type": "log", "text": f"[OPT] Lirik lagu ({lang}) akan diunduh & disesuaikan sebagai file .lrc.\n"})
             else:
-                options.extend(["--write-subs", "--write-auto-subs", "--sub-langs", lang])
+                options.extend(["--write-subs", "--write-auto-subs", "--sub-langs", effective_lang, "--convert-subs", "srt"])
                 if embed_subs:
-                    options.extend(["--embed-subs", "--convert-subs", "srt", "--postprocessor-args", "EmbedSubtitle:-disposition:s:0 default"])
-                    ui_queue.put({"type": "log", "text": f"[OPT] Subtitle ({lang}) di-embed & di-set sebagai default aktif.\n"})
+                    ui_queue.put({"type": "log", "text": f"[OPT] Subtitle ({lang}) di-embed sebagai Softsub P0 (Default Aktif & Bisa ON/OFF).\n"})
                 if download_subs:
                     options.extend(["--sub-format", "srt"])
                     ui_queue.put({"type": "log", "text": f"[OPT] Subtitle ({lang}) file .srt terpisah.\n"})
@@ -253,67 +536,29 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = subprocess.SW_HIDE
             
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True, startupinfo=startupinfo)
+        import time
+        download_start_time = time.time() - 3.0
+
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1, universal_newlines=True,
+            startupinfo=startupinfo, encoding='utf-8', errors='ignore'
+        )
         current_process = process
         for line in iter(process.stdout.readline, ''):
             update_progress_bar(line)
         process.wait() 
         if process.returncode == 0:
             ui_queue.put({"type": "log", "text": "\n\n--- UNDUHAN SUKSES ---\n"})
-            if mode == "audio_only" and (download_subs or embed_subs):
-                try:
-                    for item in os.listdir(output_dir):
-                        file_path = os.path.join(output_dir, item)
-                        if not os.path.isfile(file_path):
-                            continue
-                        
-                        item_lower = item.lower()
-                        # Memeriksa file subtitle/lirik (.srt, .vtt, .lrc, .ass) untuk semua bahasa
-                        if item_lower.endswith(('.srt', '.vtt', '.lrc', '.ass')):
-                            # Ekstrak judul lagu utama tanpa akhiran bahasa (misal: "Lagu.ja.srt" atau "Lagu.id.srt" -> "Lagu")
-                            parts = item.rsplit('.', 2)
-                            if len(parts) == 3 and parts[1].replace('-', '_').isalnum() and len(parts[1]) <= 6:
-                                base_name = parts[0]
-                            else:
-                                base_name = os.path.splitext(item)[0]
-                                
-                            target_lrc_path = os.path.join(output_dir, base_name + ".lrc")
-                            
-                            if item_lower.endswith('.lrc'):
-                                try:
-                                    if os.path.exists(target_lrc_path) and target_lrc_path != file_path:
-                                        os.remove(target_lrc_path)
-                                    os.rename(file_path, target_lrc_path)
-                                    ui_queue.put({"type": "log", "text": f"[LIRIK] Nama file lirik disesuaikan -> '{base_name}.lrc'\n"})
-                                except Exception:
-                                    pass
-                            else:
-                                if convert_srt_file_to_lrc(file_path, target_lrc_path):
-                                    try:
-                                        os.remove(file_path)
-                                        ui_queue.put({"type": "log", "text": f"[LIRIK] Subtitle dikonversi ke lirik musik -> '{base_name}.lrc'\n"})
-                                    except Exception:
-                                        pass
-                except Exception as e:
-                    pass
-            elif embed_subs and not download_subs:
-                try:
-                    for item in os.listdir(output_dir):
-                        if item.endswith(('.srt', '.vtt', '.ass', '.ttml')):
-                            file_path = os.path.join(output_dir, item)
-                            if os.path.isfile(file_path):
-                                try:
-                                    os.remove(file_path)
-                                    ui_queue.put({"type": "log", "text": f"[CLEANUP] Menghapus file subtitle luar '{item}' (sudah ter-embed ke video).\n"})
-                                except Exception:
-                                    pass
-                except Exception:
-                    pass
+            if download_subs or embed_subs:
+                process_downloaded_subtitles(output_dir, download_start_time, mode == "audio_only", embed_subs, download_subs)
         elif current_process is None:
             # Unduhan dibatalkan pengguna
             pass
         else:
             ui_queue.put({"type": "log", "text": f"\n\n--- UNDUHAN GAGAL --- (Kode: {process.returncode})\n"})
+            # Sinyal ke UI agar tombol AI Error Analyzer muncul
+            ui_queue.put({"type": "download_error"})
     except FileNotFoundError:
         ui_queue.put({"type": "log", "text": "\nERROR: yt-dlp atau aria2c tidak ditemukan."})
     except Exception as e:
@@ -331,7 +576,10 @@ def get_local_ytdlp_version():
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = subprocess.SW_HIDE
-        res = subprocess.run([YT_DLP_PATH, "--version"], capture_output=True, text=True, timeout=5, startupinfo=startupinfo)
+        res = subprocess.run(
+            [YT_DLP_PATH, "--version"], capture_output=True, text=True,
+            timeout=5, startupinfo=startupinfo, encoding='utf-8', errors='ignore'
+        )
         if res.returncode == 0:
             return res.stdout.strip()
     except Exception:
