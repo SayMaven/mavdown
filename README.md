@@ -1,4 +1,4 @@
-# Maven Downloader (V1.6)
+# Maven Downloader (V1.7)
 
 ![Maven Downloader Screenshot](https://res.cloudinary.com/ds4a54vuy/image/upload/v1785133143/Screenshot_mavdown_1_7.png)
 
@@ -48,16 +48,6 @@ mavdown/
    python mavdown.py
    ```
 
-## Membangun Aplikasi (Build ke EXE Installer)
-
-Aplikasi ini menggunakan **Nuitka** (bukan PyInstaller) untuk menghasilkan performa eksekusi yang lebih cepat, waktu buka (*startup*) yang instan, dan menghindari deteksi *false-positive* antivirus yang sering menimpa PyInstaller. Pengemasan akhir menggunakan **Inno Setup**.
-
-1. Jalankan klik dua kali pada skrip `build_nuitka.bat`. (Pastikan modul `nuitka` sudah terinstall via pip).
-2. Nuitka akan membungkus aplikasi beserta aset `bin/` ke dalam folder `dist/`. Tunggu hingga selesai.
-3. Unduh dan pasang [Inno Setup](https://jrsoftware.org/isinfo.php).
-4. Buka file `setup.iss` melalui Inno Setup, lalu klik menu **Build > Compile**.
-5. Hasil akhirnya adalah `MavenDownloader_Setup_v1.6.exe` di dalam folder `Output/`, yang siap Anda distribusikan ke pengguna lain!
-
 ## Lisensi
 
-Proyek ini dilisensikan di bawah [MIT License](LICENSE). Bebas digunakan, dimodifikasi, dan disebarluaskan.
+Proyek ini dilisensikan di bawah [MIT License](LICENSE). 
