@@ -4,8 +4,6 @@
 
 Maven Downloader adalah aplikasi GUI berbasis Python untuk mengunduh video dan audio dari berbagai platform dengan mudah. Aplikasi ini memanfaatkan `yt-dlp` sebagai *engine* utama, `aria2c` untuk mempercepat proses unduhan (*multi-connection*), dan `ffmpeg` untuk konversi media.
 
-Versi terbaru (V1.6) hadir dengan antarmuka modern yang ditenagai oleh `customtkinter`, perlindungan sistem dari *freeze* (komunikasi UI berbasis antrean/*thread-safe*), dan migrasi penuh ke Nuitka & Inno Setup.
-
 ## Fitur Utama
 
 - **Modern GUI**: Desain antarmuka minimalis dan responsif yang mendukung mode gelap/terang (Dark/Light mode) secara otomatis.
@@ -18,16 +16,21 @@ Versi terbaru (V1.6) hadir dengan antarmuka modern yang ditenagai oleh `customtk
 
 ```text
 mavdown/
-├── assets/           # Berisi icon UI (waifu_icon.ico)
+├── assets/           # Berisi icon UI dan aset gambar lainnya
 ├── bin/              # Dependencies pihak ketiga (yt-dlp.exe, aria2c.exe, ffmpeg.exe, node.exe)
-├── dist/             # (Otomatis dibuat) Hasil kompilasi Nuitka beserta bundel bin/
+├── dist/             # (Otomatis) Hasil kompilasi Nuitka beserta bundel bin/
+├── downloads/        # (Otomatis) Folder default penyimpanan unduhan
+├── Output/           # (Otomatis) Hasil installer (.exe) dari Inno Setup
 ├── config.py         # Pengaturan direktori & konfigurasi aplikasi
-├── downloader.py     # Engine logika unduhan, yt-dlp, konversi lirik (.lrc), & update
+├── config.json       # (Otomatis) File penyimpanan preferensi pengguna
+├── downloader.py     # Engine logika unduhan, yt-dlp, konversi lirik, & update
 ├── gui.py            # Antarmuka modern (Dark Slate UI, CustomTkinter)
 ├── mavdown.py        # Entry point utama aplikasi
-├── build_nuitka.bat  # Skrip otomatisasi kompilasi Nuitka & penyalinan bin/
+├── build_nuitka.bat  # Skrip otomatisasi kompilasi Nuitka
 ├── setup.iss         # Skrip pembuatan installer resmi (.exe) via Inno Setup
-└── requirements.txt  # Daftar pustaka Python yang dibutuhkan
+├── requirements.txt  # Daftar pustaka Python yang dibutuhkan
+├── .gitignore        # Daftar file dan folder yang diabaikan Git
+└── LICENSE           # Informasi lisensi proyek
 ```
 
 ## Cara Menjalankan Kode Sumber
