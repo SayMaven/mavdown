@@ -1,4 +1,4 @@
-# Maven Downloader (V1.7)
+# Maven Downloader
 
 ![Maven Downloader Screenshot](https://res.cloudinary.com/ds4a54vuy/image/upload/v1785133143/Screenshot_mavdown_1_7.png)
 
