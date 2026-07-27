@@ -215,6 +215,9 @@ class App(ctk.CTk):
         # Track whether the dynamic info section has been shown yet
         self._info_container_shown: bool = False
         self._active_thumb_image = None
+        # Batch queue coordination
+        self._queue_done_event = threading.Event()
+        self._queue_running: bool = False
 
         self.setup_ui()
         self.after(100, self.process_ui_queue)
@@ -284,11 +287,15 @@ class App(ctk.CTk):
                     self.progress_bar.set(1.0)
                     self.progress_label.configure(text="Status: Unduhan Selesai ✨")
                     self.stats_label.configure(text="")
-                    self.show_toast("Unduhan selesai! ✨", "success")
+                    # Sinyal ke thread antrean bahwa download sudah selesai
+                    self._queue_done_event.set()
+                    if not self._queue_running:
+                        self.show_toast("Unduhan selesai! ✨", "success")
                     # Pindah ke tab Log
                     self.right_tabview.set(TAB_LOG)
 
                 elif msg_type == "download_error":
+                    self._queue_done_event.set()  # Lanjutkan ke item berikutnya meski error
                     self.show_toast("Unduhan gagal. Periksa tab 📜 Log untuk detail error.", "error")
 
                 elif msg_type == "update_finish":
@@ -491,35 +498,77 @@ class App(ctk.CTk):
         self.title_label.pack(fill="x", anchor="w", pady=(0, 8))
 
         # ── Dynamic Info Container ────────────────────────────────────────
-        # Single container wrapping meta + badges + AI panel.
+        # Single container wrapping meta + badges.
         # Packed ONCE on first _on_info_data(); never pack_forgot again.
-        # This prevents pack-ordering bugs when switching between URLs.
         self._info_container = ctk.CTkFrame(pi, fg_color="transparent")
         # (NOT packed yet — packed on first successful Cek Info)
 
-        # Metadata grid (channel, duration, views)
-        self.meta_frame = ctk.CTkFrame(self._info_container, fg_color="#0E0F17", corner_radius=8)
-        self.meta_frame.pack(fill="x", pady=(0, 8))
+        # ── Metadata card ─────────────────────────────────────────────────
+        self.meta_frame = ctk.CTkFrame(self._info_container, fg_color="#0E0F17", corner_radius=10)
+        self.meta_frame.pack(fill="x", pady=(0, 6))
 
-        meta_inner = ctk.CTkFrame(self.meta_frame, fg_color="transparent")
-        meta_inner.pack(fill="x", padx=10, pady=8)
+        # Header row: platform chip (left) + upload date (right)
+        meta_top = ctk.CTkFrame(self.meta_frame, fg_color="transparent")
+        meta_top.pack(fill="x", padx=10, pady=(8, 4))
+        self.meta_platform = ctk.CTkLabel(
+            meta_top, text="", font=ctk.CTkFont(size=10, weight="bold"),
+            text_color="#818CF8", anchor="w"
+        )
+        self.meta_platform.pack(side="left")
+        self.meta_date = ctk.CTkLabel(
+            meta_top, text="", font=ctk.CTkFont(size=10),
+            text_color="#6B7280", anchor="e"
+        )
+        self.meta_date.pack(side="right")
+
+        # Thin separator
+        ctk.CTkFrame(self.meta_frame, fg_color="#1F2937", height=1).pack(fill="x", padx=10)
+
+        # 2-column grid: icon-label pairs
+        meta_grid = ctk.CTkFrame(self.meta_frame, fg_color="transparent")
+        meta_grid.pack(fill="x", padx=10, pady=(6, 4))
+        meta_grid.columnconfigure(0, weight=1)
+        meta_grid.columnconfigure(1, weight=1)
 
         self.meta_channel = ctk.CTkLabel(
-            meta_inner, text="", font=ctk.CTkFont(size=11), text_color="#9CA3AF", anchor="w"
+            meta_grid, text="", font=ctk.CTkFont(size=11), text_color="#D1D5DB", anchor="w"
         )
-        self.meta_channel.pack(fill="x")
-        self.meta_duration = ctk.CTkLabel(
-            meta_inner, text="", font=ctk.CTkFont(size=11), text_color="#9CA3AF", anchor="w"
-        )
-        self.meta_duration.pack(fill="x")
-        self.meta_views = ctk.CTkLabel(
-            meta_inner, text="", font=ctk.CTkFont(size=11), text_color="#9CA3AF", anchor="w"
-        )
-        self.meta_views.pack(fill="x")
+        self.meta_channel.grid(row=0, column=0, sticky="w", pady=2)
 
-        # Quality badges row (always packed inside container; children rebuilt each time)
+        self.meta_duration = ctk.CTkLabel(
+            meta_grid, text="", font=ctk.CTkFont(size=11), text_color="#D1D5DB", anchor="w"
+        )
+        self.meta_duration.grid(row=0, column=1, sticky="w", pady=2)
+
+        self.meta_views = ctk.CTkLabel(
+            meta_grid, text="", font=ctk.CTkFont(size=11), text_color="#D1D5DB", anchor="w"
+        )
+        self.meta_views.grid(row=1, column=0, sticky="w", pady=2)
+
+        self.meta_likes = ctk.CTkLabel(
+            meta_grid, text="", font=ctk.CTkFont(size=11), text_color="#D1D5DB", anchor="w"
+        )
+        self.meta_likes.grid(row=1, column=1, sticky="w", pady=2)
+
+        # Description preview (max 2 lines)
+        self.meta_desc = ctk.CTkLabel(
+            self.meta_frame, text="",
+            font=ctk.CTkFont(size=10), text_color="#6B7280",
+            anchor="w", justify="left", wraplength=334
+        )
+        self.meta_desc.pack(fill="x", padx=10, pady=(2, 8))
+
+        # ── Quality badges row ────────────────────────────────────────────
+        badges_header = ctk.CTkFrame(self._info_container, fg_color="transparent")
+        badges_header.pack(fill="x", pady=(0, 3))
+        ctk.CTkLabel(
+            badges_header, text="KUALITAS TERSEDIA",
+            font=ctk.CTkFont(size=9, weight="bold"), text_color="#374151"
+        ).pack(side="left")
+
         self.badges_frame = ctk.CTkFrame(self._info_container, fg_color="transparent")
         self.badges_frame.pack(fill="x", pady=(0, 4))
+
 
         # ── Progress Section ─────────────────────────────────────────────
         prog_card = ctk.CTkFrame(pi, fg_color="#0E0F17", corner_radius=10)
@@ -865,10 +914,28 @@ class App(ctk.CTk):
     def _on_info_data(self, info: dict):
         self.last_video_info = info
 
-        # ── Update metadata labels ───────────────────────────────────────
+        # ── Platform chip ────────────────────────────────────────────────
+        webpage_url = info.get('webpage_url', '') or info.get('url', '')
+        platform_text = ""
+        for (pattern, label, _color) in PLATFORM_PATTERNS:
+            if re.search(pattern, webpage_url, re.IGNORECASE):
+                platform_text = label
+                break
+        self.meta_platform.configure(text=platform_text)
+
+        # ── Upload date ─────────────────────────────────────────────────
+        raw_date = info.get('upload_date', '')  # format: YYYYMMDD
+        if raw_date and len(raw_date) == 8:
+            date_str = f"{raw_date[6:8]}/{raw_date[4:6]}/{raw_date[:4]}"
+        else:
+            date_str = ""
+        self.meta_date.configure(text=date_str)
+
+        # ── Channel ─────────────────────────────────────────────────────
         channel = info.get('uploader') or info.get('channel') or info.get('uploader_id', '')
         self.meta_channel.configure(text=f"👤 {channel}" if channel else "")
 
+        # ── Duration ────────────────────────────────────────────────────
         dur_str = info.get('duration_string', '')
         if not dur_str:
             dur_sec = info.get('duration', 0)
@@ -876,16 +943,42 @@ class App(ctk.CTk):
                 m, s = divmod(int(dur_sec), 60)
                 h, m = divmod(m, 60)
                 dur_str = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
-        self.meta_duration.configure(text=f"⏱️  {dur_str}" if dur_str else "")
+        self.meta_duration.configure(text=f"⏱️ {dur_str}" if dur_str else "")
 
+        # ── Views ────────────────────────────────────────────────────────
         vc = info.get('view_count', 0)
         if vc:
             vc_str = f"{vc:,}".replace(",", ".")
-            self.meta_views.configure(text=f"👁️  {vc_str} penonton")
+            self.meta_views.configure(text=f"👁️ {vc_str}")
         else:
             self.meta_views.configure(text="")
 
-        # ── Rebuild quality badges (always destroy & recreate) ────────────
+        # ── Likes ────────────────────────────────────────────────────────
+        lc = info.get('like_count', 0)
+        if lc:
+            if lc >= 1_000_000:
+                lc_str = f"{lc/1_000_000:.1f}Jt"
+            elif lc >= 1_000:
+                lc_str = f"{lc/1_000:.1f}Rb"
+            else:
+                lc_str = str(lc)
+            self.meta_likes.configure(text=f"👍 {lc_str}")
+        else:
+            self.meta_likes.configure(text="")
+
+        # ── Description preview (first 100 chars, single line trimmed) ──
+        desc_raw = info.get('description', '') or ''
+        if desc_raw:
+            # Take first 2 non-empty lines, join them
+            lines = [l.strip() for l in desc_raw.splitlines() if l.strip()]
+            preview = " · ".join(lines[:2])
+            if len(preview) > 110:
+                preview = preview[:107] + "..."
+            self.meta_desc.configure(text=preview)
+        else:
+            self.meta_desc.configure(text="")
+
+        # ── Rebuild quality badges ────────────────────────────────────────
         for widget in self.badges_frame.winfo_children():
             widget.destroy()
 
@@ -896,31 +989,38 @@ class App(ctk.CTk):
             str(f.get('dynamic_range', '')).upper() in ('HDR', 'HDR10', 'HDR10+', 'DOVI', 'HLG')
             for f in formats
         )
+        # Audio codecs available
+        audio_codecs = set(
+            (f.get('acodec') or '').split('.')[0].lower()
+            for f in formats if f.get('acodec') and f.get('acodec') != 'none'
+        )
+
         badges = []
         max_h = max(heights, default=0)
-        if max_h >= 2160: badges.append(("4K", "#F59E0B"))
-        if max_h >= 1440: badges.append(("1440p", "#10B981"))
-        if max_h >= 1080: badges.append(("1080p", "#3B82F6"))
-        if any(f >= 59 for f in fps_vals): badges.append(("60FPS", "#8B5CF6"))
-        if has_hdr: badges.append(("HDR", "#F97316"))
+        if max_h >= 2160: badges.append(("4K", "#F59E0B", "🌟"))
+        elif max_h >= 1440: badges.append(("2K", "#10B981", "✨"))
+        if max_h >= 1080: badges.append(("1080p", "#3B82F6", "📺"))
+        elif max_h >= 720: badges.append(("720p", "#6366F1", "📺"))
+        elif max_h >= 480: badges.append(("480p", "#8B5CF6", "📺"))
+        if any(f >= 59 for f in fps_vals): badges.append(("60FPS", "#EC4899", "⚡"))
+        if has_hdr: badges.append(("HDR", "#F97316", "🌈"))
+        if 'opus' in audio_codecs: badges.append(("Opus", "#14B8A6", "🎵"))
+        elif 'mp4a' in audio_codecs or 'aac' in audio_codecs: badges.append(("AAC", "#06B6D4", "🎵"))
+        if not heights and formats: badges.append(("Audio", "#A78BFA", "🎧"))
 
-        if badges:
+        for (badge_text, fg, icon) in badges:
+            b = ctk.CTkFrame(self.badges_frame, fg_color=fg, corner_radius=6)
+            b.pack(side="left", padx=(0, 4), pady=2)
             ctk.CTkLabel(
-                self.badges_frame, text="🏷️",
-                font=ctk.CTkFont(size=10), text_color="#6B7280"
-            ).pack(side="left", padx=(0, 4))
-            for (badge_text, fg) in badges:
-                b = ctk.CTkFrame(self.badges_frame, fg_color=fg, corner_radius=5)
-                b.pack(side="left", padx=2)
-                ctk.CTkLabel(
-                    b, text=badge_text, font=ctk.CTkFont(size=9, weight="bold"),
-                    text_color="white"
-                ).pack(padx=5, pady=2)
+                b, text=f"{icon} {badge_text}", font=ctk.CTkFont(size=9, weight="bold"),
+                text_color="white"
+            ).pack(padx=6, pady=3)
 
         # ── Show info container (only packed once, stays in place after) ──
         if not self._info_container_shown:
             self._info_container.pack(fill="x", pady=(0, 4))
             self._info_container_shown = True
+
 
     # =========================================================================
     # Batch Queue Tab Actions
@@ -958,28 +1058,60 @@ class App(ctk.CTk):
         if not self._queue_items:
             self.show_toast("Antrean kosong.", "warning")
             return
-        self.show_toast(f"Memulai {len(self._queue_items)} unduhan dalam antrean...", "info")
+        if self._queue_running:
+            self.show_toast("Antrean sedang berjalan.", "warning")
+            return
+
+        total = len(self._queue_items)
+        self.show_toast(f"▶️ Memulai {total} unduhan dalam antrean...", "info")
 
         def _run_queue():
-            for (url, status_var) in self._queue_items:
+            self._queue_running = True
+            completed = 0
+            failed = 0
+
+            for (url, status_var) in list(self._queue_items):
+                # Update status UI di main thread
                 self.after(0, lambda sv=status_var: sv.set("🔄 Mengunduh"))
-                # Set URL and trigger download
-                self.after(0, lambda u=url: self.url_entry.delete(0, "end"))
-                self.after(0, lambda u=url: self.url_entry.insert(0, u))
-                # Use an event to wait for download completion
-                import time
-                # Simple sequential approach: trigger and wait
-                done_event = threading.Event()
-                original_finish = None
+                self.after(0, lambda: self.progress_label.configure(
+                    text=f"Antrean: {completed+1}/{total}"
+                ))
 
-                def _patched_finish(sv=status_var, ev=done_event):
-                    sv.set("✅ Selesai")
-                    ev.set()
+                # Reset event sebelum mulai download
+                self._queue_done_event.clear()
 
-                self.after(0, self.on_download)
-                # Wait up to 30 minutes per item
-                done_event.wait(timeout=1800)
-                import time; time.sleep(1)
+                # Jalankan download langsung (sama persis seperti tombol unduh biasa)
+                download_video_logic(
+                    url,
+                    self.mode_var.get(),
+                    self.audio_only_format_var.get(),
+                    self.resolution_var.get(),
+                    self.video_codec_var.get(),
+                    self.audio_codec_var.get(),
+                    self.container_var.get(),
+                    self.download_subs_var.get(),
+                    self.embed_subs_var.get(),
+                    self.subs_lang_var.get().strip(),
+                    self.embed_thumb_var.get(),
+                    self.use_aria2_var.get(),
+                    self.download_playlist_var.get(),
+                    self.custom_output_path_var.get(),
+                    self.custom_cmd_var.get().strip()
+                )
+
+                # Tunggu sinyal selesai dari process_ui_queue (maks 60 menit)
+                self._queue_done_event.wait(timeout=3600)
+
+                # Tentukan status akhir item
+                # (download_video_logic sudah kirim download_finish ke ui_queue)
+                completed += 1
+                self.after(0, lambda sv=status_var: sv.set("✅ Selesai"))
+
+            self._queue_running = False
+            self.after(0, lambda: self.show_toast(
+                f"✅ Antrean selesai! {completed} video berhasil diunduh.", "success"
+            ))
+            self.after(0, lambda: self.progress_label.configure(text="Status: Semua Antrean Selesai ✨"))
 
         threading.Thread(target=_run_queue, daemon=True).start()
 
@@ -1119,21 +1251,6 @@ class App(ctk.CTk):
     # =========================================================================
     # Settings Window
     # =========================================================================
-    def open_settings(self):
-        if self._settings_window and self._settings_window.winfo_exists():
-            self._settings_window.focus()
-            return
-        self._settings_window = SettingsWindow(
-            self,
-            current_api_key=self.gemini_api_key,
-            on_save=self._on_settings_save
-        )
-
-    def _on_settings_save(self, api_key: str):
-        self.gemini_api_key = api_key
-        save_config(api_key=api_key)
-        status = "✅ API Key tersimpan!" if api_key else "⚠️ API Key dikosongkan."
-        self.show_toast(status, "success" if api_key else "warning")
 
     # =========================================================================
     # Segmented Button Handlers
@@ -1248,20 +1365,15 @@ class App(ctk.CTk):
 
         if self._info_container_shown:
             # Container is already visible — just reset content in-place
+            self.meta_platform.configure(text="")
+            self.meta_date.configure(text="")
             self.meta_channel.configure(text="")
             self.meta_duration.configure(text="")
             self.meta_views.configure(text="")
+            self.meta_likes.configure(text="")
+            self.meta_desc.configure(text="")
             for widget in self.badges_frame.winfo_children():
                 widget.destroy()
-            # Collapse AI result area and disable buttons while loading
-            self.ai_result_text.delete("1.0", "end")
-            if self.ai_result_text.winfo_ismapped():
-                self.ai_result_text.pack_forget()
-            self.ai_metadata_btn.configure(state="disabled", text="🏷️ AI Metadata")
-            self.ai_settings_btn.configure(state="disabled", text="⚙️ AI Settings")
-            # Hide error button until next download failure
-            if self.ai_error_btn.winfo_ismapped():
-                self.ai_error_btn.pack_forget()
 
         threading.Thread(target=get_video_info, args=(url,), daemon=True).start()
 

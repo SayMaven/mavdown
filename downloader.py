@@ -40,20 +40,47 @@ def create_yt_dlp_command(url, options=[]):
     command.append(url)
     return command
 
+# State progress download — reset setiap kali download baru dimulai
+_dl_segment_count = 0   # jumlah segmen [download] Destination yang sudah terdeteksi
+
+def reset_download_phase():
+    global _dl_segment_count
+    _dl_segment_count = 0
+
 def update_progress_bar(line):
+    global _dl_segment_count
     progress_data = {"type": "progress"}
 
-    # Persen unduhan
+    # Deteksi awal segmen baru (yt-dlp log: "[download] Destination: ...")
+    # Setiap segmen baru menaikkan counter fase
+    if re.search(r'\[download\]\s+Destination:', line):
+        _dl_segment_count += 1
+
+    # Persen unduhan (yt-dlp native atau aria2c)
     match_yt = re.search(r'\[download\]\s+([\d.]+)%', line)
     match_aria = re.search(r'\(([\d.]+)%\)', line)
-    if match_yt:
-        percent = float(match_yt.group(1))
-        progress_data["value"] = percent / 100.0
-        progress_data["text"] = f"Status: {percent:.1f}%"
-    elif match_aria:
-        percent = float(match_aria.group(1))
-        progress_data["value"] = percent / 100.0
-        progress_data["text"] = f"Status: {percent:.1f}%"
+
+    if match_yt or match_aria:
+        raw = match_yt or match_aria
+        percent = float(raw.group(1))
+
+        # 2-fase: segmen 1 = video (0–70%), segmen 2 = audio (70–100%)
+        # Kalau hanya 1 segmen (audio-only / muxed), pakai 0–100% biasa
+        if _dl_segment_count >= 2:
+            # Fase audio: 70% + porsi 30%
+            unified = 0.70 + (percent / 100.0) * 0.30
+            phase_label = f"Audio {percent:.1f}%"
+        elif _dl_segment_count == 1:
+            # Fase video: porsi 70%
+            unified = (percent / 100.0) * 0.70
+            phase_label = f"Video {percent:.1f}%"
+        else:
+            # Belum ada Destination terdeteksi (aria2 dll) — fallback biasa
+            unified = percent / 100.0
+            phase_label = f"{percent:.1f}%"
+
+        progress_data["value"] = min(unified, 1.0)
+        progress_data["text"] = f"Status: {phase_label}"
 
     # Kecepatan unduhan (contoh: 8.50MiB/s)
     match_speed = re.search(r'at\s+([\d.]+\s*[KMGTk]i?B/s)', line)
@@ -76,6 +103,7 @@ def update_progress_bar(line):
         ui_queue.put(progress_data)
 
     ui_queue.put({"type": "log", "text": line})
+
 
 def get_video_info(url):
     info_options = ["--skip-download", "--print-json", "--no-playlist", "--js-runtimes", f"node:{NODE_PATH}"]
@@ -413,6 +441,8 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
     output_dir = custom_path if custom_path else DEFAULT_OUTPUT_DIR
     
     ui_queue.put({"type": "progress", "value": 0, "text": "Progress: 0.0%"})
+    reset_download_phase()  # Reset fase video/audio untuk download baru
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         

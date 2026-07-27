@@ -1,6 +1,6 @@
 [Setup]
 AppName=Maven Downloader
-AppVersion=1.6
+AppVersion=1.7
 AppPublisher=SayMaven
 DefaultDirName={autopf}\Maven Downloader
 DefaultGroupName=Maven Downloader
@@ -8,7 +8,7 @@ UninstallDisplayIcon={app}\mavdown.exe
 Compression=lzma2
 SolidCompression=yes
 OutputDir=Output
-OutputBaseFilename=MavenDownloader_Setup_v1.6
+OutputBaseFilename=MavenDownloader_Setup_v1.7
 SetupIconFile=assets\waifu_icon.ico
 
 [Files]
