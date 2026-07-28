@@ -9,8 +9,12 @@ import queue
 import yt_dlp
 import threading
 import time
+import zipfile
+import tempfile
+import stat
+import shutil
 
-from config import DEFAULT_OUTPUT_DIR
+from config import DEFAULT_OUTPUT_DIR, is_android, BASE_DIR
 
 # Antrean pesan untuk thread safety (ke UI)
 ui_queue = queue.Queue()
@@ -89,6 +93,31 @@ def expand_sub_langs(subs_lang_str: str) -> str:
             res.append(item)
     return ",".join(res)
 
+def setup_ffmpeg_android(task_id=None):
+    if not is_android():
+        return None
+        
+    try:
+        ffmpeg_bin_path = os.path.join(BASE_DIR, "bin", "ffmpeg")
+        if not os.path.exists(ffmpeg_bin_path):
+            if task_id: ui_queue.put({"type": "log", "task_id": task_id, "text": f"[WARN] FFmpeg tidak ditemukan di {ffmpeg_bin_path}\n"})
+            return None
+            
+        cache_dir = tempfile.gettempdir()
+        target_ffmpeg = os.path.join(cache_dir, "ffmpeg")
+        
+        if not os.path.exists(target_ffmpeg) or os.path.getsize(ffmpeg_bin_path) != os.path.getsize(target_ffmpeg):
+            if task_id: ui_queue.put({"type": "log", "task_id": task_id, "text": "[INFO] Menyalin FFmpeg khusus Android ke cache...\n"})
+            shutil.copy2(ffmpeg_bin_path, target_ffmpeg)
+                
+        st = os.stat(target_ffmpeg)
+        os.chmod(target_ffmpeg, st.st_mode | stat.S_IEXEC)
+        
+        return target_ffmpeg
+    except Exception as e:
+        if task_id: ui_queue.put({"type": "log", "task_id": task_id, "text": f"[ERROR] Gagal mengatur FFmpeg: {e}\n"})
+        return None
+
 
 def download_video_logic(task_id, url, mode, audio_format, res, vcodec, acodec, container, download_subs, embed_subs, subs_lang, embed_thumb, download_playlist, custom_path, custom_cmd=""):
     output_dir = custom_path if custom_path else DEFAULT_OUTPUT_DIR
@@ -135,6 +164,22 @@ def download_video_logic(task_id, url, mode, audio_format, res, vcodec, acodec, 
             size_total = d.get('_total_bytes_str', '') or d.get('_total_bytes_estimate_str', '')
             size_total = re.sub(r'\x1b\[[0-9;]*m', '', size_total).strip()
 
+            state = download_state.get(task_id, {})
+            current_filename = d.get('filename', '')
+            if state.get("current_filename") != current_filename:
+                state["current_filename"] = current_filename
+                state["part_index"] = state.get("part_index", 0) + 1
+
+            part = ""
+            if mode != "audio_only":
+                part_idx = state.get("part_index", 1)
+                if part_idx == 1:
+                    part = "Video"
+                elif part_idx == 2:
+                    part = "Audio"
+                else:
+                    part = "Proses Tambahan"
+
             ui_queue.put({
                 "type": "progress",
                 "task_id": task_id,
@@ -143,7 +188,8 @@ def download_video_logic(task_id, url, mode, audio_format, res, vcodec, acodec, 
                 "speed": speed,
                 "eta": eta,
                 "size_dl": size_dl,
-                "size_total": size_total
+                "size_total": size_total,
+                "part": part
             })
     
     ydl_opts = {
@@ -154,6 +200,12 @@ def download_video_logic(task_id, url, mode, audio_format, res, vcodec, acodec, 
         'noplaylist': not download_playlist,
         'concurrent_fragment_downloads': 8,
     }
+    
+    if is_android():
+        ffmpeg_path = setup_ffmpeg_android(task_id)
+        if ffmpeg_path:
+            ydl_opts['ffmpeg_location'] = ffmpeg_path
+
 
     if mode == "audio_only":
         ydl_opts['format'] = 'bestaudio/best'

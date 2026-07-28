@@ -2,6 +2,9 @@ import os
 import sys
 import json
 
+def is_android():
+    return hasattr(sys, 'getandroidapilevel') or "ANDROID_STORAGE" in os.environ or "ANDROID_ROOT" in os.environ
+
 # Konfigurasi Path yang aman untuk Nuitka & Python murni
 if "__compiled__" in globals() or getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
@@ -11,10 +14,13 @@ else:
 # Untuk porting ke Android (Flet), kita tidak lagi bergantung pada .exe eksternal.
 # Jika membutuhkan FFmpeg khusus, letakkan di path Android atau gunakan modul eksternal.
 
-DEFAULT_OUTPUT_DIR = os.path.expanduser("~/storage/shared/Download/Mavdown")
-if not os.path.exists(os.path.expanduser("~/storage/shared/Download")):
-    # Fallback ke folder lokal jika tidak berjalan di Android
-    DEFAULT_OUTPUT_DIR = os.path.join(BASE_DIR, "downloads")
+if is_android():
+    DEFAULT_OUTPUT_DIR = "/storage/emulated/0/Download/Mavdown"
+else:
+    DEFAULT_OUTPUT_DIR = os.path.expanduser("~/storage/shared/Download/Mavdown")
+    if not os.path.exists(os.path.expanduser("~/storage/shared/Download")):
+        # Fallback ke folder lokal jika tidak berjalan di Android
+        DEFAULT_OUTPUT_DIR = os.path.join(BASE_DIR, "downloads")
 
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 

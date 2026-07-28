@@ -28,3 +28,5 @@ setup.iss
 build_nuitka.bat
 
 seal_repo/
+# Android Build
+*.apk

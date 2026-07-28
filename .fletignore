@@ -1,0 +1,14 @@
+.git/
+__pycache__/
+build/
+dist/
+downloads/
+Output/
+seal_repo/
+*.apk
+*.aab
+config.json
+*.exe
+bin/*.exe
+bin/*.old
+*.build/

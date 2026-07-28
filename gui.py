@@ -4,8 +4,9 @@ import uuid
 import webbrowser
 import os
 import re
+import time
 
-from config import load_config, save_config, get_full_config, save_full_config, DEFAULT_OUTPUT_DIR
+from config import load_config, save_config, get_full_config, save_full_config, DEFAULT_OUTPUT_DIR, is_android
 from downloader import download_video_logic, download_state, ui_queue, get_video_info
 
 # Global App State
@@ -116,8 +117,8 @@ def main(page: ft.Page):
             
             duration = info.get("duration")
             if duration:
-                mins, secs = divmod(duration, 60)
-                meta_duration_text.value = f"{mins}:{secs:02d}"
+                mins, secs = divmod(int(duration), 60)
+                meta_duration_text.value = f"{mins:02d}:{secs:02d}"
             else:
                 meta_duration_text.value = ""
                 
@@ -754,6 +755,29 @@ def main(page: ft.Page):
     # ===========================================================================
     # 8. SETTINGS VIEW (M3 FULL PAGE)
     # ===========================================================================
+    lokasi_unduhan_subtitle = ft.Text(cfg_init.get("output_path", DEFAULT_OUTPUT_DIR), color=ft.Colors.ON_SURFACE_VARIANT)
+
+    async def on_folder_click(e):
+        if is_android():
+            show_toast("Lokasi tidak dapat diubah di Android")
+            return
+            
+        # Gunakan Tkinter khusus di Windows untuk menghindari bug FilePicker Flet
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.attributes('-topmost', True)
+        root.withdraw()
+        path = filedialog.askdirectory(parent=root, initialdir=cfg_init.get("output_path", ""))
+        root.destroy()
+        
+        if path:
+            save_full_config({"output_path": path})
+            cfg_init["output_path"] = path
+            lokasi_unduhan_subtitle.value = path
+            lokasi_unduhan_subtitle.update()
+            show_toast(f"Lokasi unduhan diubah:\n{path}")
+            
     settings_view_container = ft.Container(
         content=ft.Column([
             ft.Row([
@@ -774,8 +798,8 @@ def main(page: ft.Page):
                 ft.ListTile(
                     leading=ft.Icon(ft.Icons.FOLDER_ROUNDED, color=ft.Colors.PRIMARY),
                     title=ft.Text("Lokasi Unduhan", weight="bold"),
-                    subtitle=ft.Text(cfg_init.get("output_path", DEFAULT_OUTPUT_DIR), color=ft.Colors.ON_SURFACE_VARIANT),
-                    on_click=lambda e: show_toast("Fitur pilih direktori")
+                    subtitle=lokasi_unduhan_subtitle,
+                    on_click=on_folder_click
                 ),
                 ft.ListTile(
                     leading=ft.Icon(ft.Icons.INFO_ROUNDED, color=ft.Colors.PRIMARY),
@@ -814,38 +838,77 @@ def main(page: ft.Page):
             if page.navigation_bar: page.navigation_bar.visible = False
         page.update()
 
+    def on_pubsub_message(payload):
+        if payload.get("type") != "batch":
+            return
+            
+        updated = False
+        for m in payload.get("messages", []):
+            msg_type = m.get("type")
+            t_id = m.get("task_id")
+            
+            if msg_type == "log":
+                log_text.value = (log_text.value or "") + m.get("text", "")
+                if len(log_text.value) > 30000:
+                    log_text.value = log_text.value[-20000:]
+                updated = True
+            
+            elif msg_type == "progress" and t_id in app_state["tasks"]:
+                c = app_state["tasks"][t_id]
+                c["progress_bar"].value = m.get("value", 0)
+                
+                part = m.get("part", "")
+                prefix = f"[{part}] " if part else ""
+                c["progress_text"].value = f"{prefix}{m.get('text', '')}"
+                
+                speed = m.get("speed", "")
+                eta = m.get("eta", "")
+                if speed and eta:
+                    c["stats_text"].value = f"{speed} | ETA: {eta}"
+                updated = True
+                
+            elif msg_type == "download_error" and t_id in app_state["tasks"]:
+                c = app_state["tasks"][t_id]
+                c["progress_bar"].color = ft.Colors.RED
+                c["progress_text"].value = "Gagal"
+                c["stats_text"].value = "Terjadi kesalahan."
+                c["cancel_btn"].visible = False
+                updated = True
+
+            elif msg_type == "download_finish" and t_id in app_state["tasks"]:
+                c = app_state["tasks"][t_id]
+                c["progress_bar"].value = 1.0
+                c["progress_bar"].color = ft.Colors.GREEN
+                c["progress_text"].value = "Selesai!"
+                c["stats_text"].value = "Tugas rampung."
+                c["cancel_btn"].visible = False
+                updated = True
+                
+        if updated:
+            page.update()
+
+    page.pubsub.subscribe(on_pubsub_message)
+
     def process_queue():
         while True:
             try:
+                # Blokir sebentar menunggu pesan
                 msg = ui_queue.get(timeout=0.1)
-                msg_type = msg.get("type")
-                t_id = msg.get("task_id")
+                msgs = [msg]
                 
-                if msg_type == "log":
-                    log_text.value = (log_text.value or "") + msg.get("text", "")
-                    if len(log_text.value) > 60000:
-                        log_text.value = log_text.value[-40000:]
-                    page.update()
+                # Kuras pesan agar terkirim dalam 1 batch
+                while not ui_queue.empty():
+                    try:
+                        msgs.append(ui_queue.get_nowait())
+                    except:
+                        break
+                        
+                # Kirim ke UI thread Flet lewat pubsub
+                page.pubsub.send_all({"type": "batch", "messages": msgs})
                 
-                elif msg_type == "progress" and t_id in app_state["tasks"]:
-                    c = app_state["tasks"][t_id]
-                    c["progress_bar"].value = msg.get("value", 0)
-                    c["progress_text"].value = msg.get("text", "")
-                    
-                    speed = msg.get("speed", "")
-                    eta = msg.get("eta", "")
-                    if speed and eta:
-                        c["stats_text"].value = f"{speed} | ETA: {eta}"
-                    page.update()
-                    
-                elif msg_type == "download_finish" and t_id in app_state["tasks"]:
-                    c = app_state["tasks"][t_id]
-                    c["progress_bar"].value = 1.0
-                    c["progress_bar"].color = ft.Colors.GREEN
-                    c["progress_text"].value = "Selesai!"
-                    c["stats_text"].value = "Tugas rampung."
-                    c["cancel_btn"].visible = False
-                    page.update()
+                # Jeda tipis agar tak membanjiri pubsub
+                time.sleep(0.05)
+                
             except Exception:
                 pass
 
