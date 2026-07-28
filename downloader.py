@@ -98,24 +98,41 @@ def setup_ffmpeg_android(task_id=None):
         return None
         
     try:
-        ffmpeg_bin_path = os.path.join(BASE_DIR, "bin", "ffmpeg")
-        if not os.path.exists(ffmpeg_bin_path):
-            if task_id: ui_queue.put({"type": "log", "task_id": task_id, "text": f"[WARN] FFmpeg tidak ditemukan di {ffmpeg_bin_path}\n"})
-            return None
-            
-        cache_dir = tempfile.gettempdir()
-        target_ffmpeg = os.path.join(cache_dir, "ffmpeg")
-        
-        if not os.path.exists(target_ffmpeg) or os.path.getsize(ffmpeg_bin_path) != os.path.getsize(target_ffmpeg):
-            if task_id: ui_queue.put({"type": "log", "task_id": task_id, "text": "[INFO] Menyalin FFmpeg khusus Android ke cache...\n"})
-            shutil.copy2(ffmpeg_bin_path, target_ffmpeg)
+        # Pendekatan 1: Menggunakan symlink Android bawaan (Paling Reliable)
+        try:
+            # __file__ berada di /data/user/0/<package_name>/files/app/downloader.py
+            # Naik 3 level untuk mendapatkan root folder aplikasi (/data/user/0/<package_name>)
+            app_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            symlink_path = os.path.join(app_root, "lib", "libffmpeg.so")
+            if os.path.exists(symlink_path):
+                if task_id: ui_queue.put({"type": "log", "task_id": task_id, "text": f"[INFO] Menggunakan FFmpeg native (symlink): {symlink_path}\n"})
+                return symlink_path
+        except Exception:
+            pass
+
+        # Pendekatan 2: Cari di LD_LIBRARY_PATH
+        ld_paths = os.environ.get("LD_LIBRARY_PATH", "").split(":")
+        for p in ld_paths:
+            so_path = os.path.join(p, "libffmpeg.so")
+            if os.path.exists(so_path):
+                if task_id: ui_queue.put({"type": "log", "task_id": task_id, "text": f"[INFO] Menggunakan FFmpeg native (LD): {so_path}\n"})
+                return so_path
                 
-        st = os.stat(target_ffmpeg)
-        os.chmod(target_ffmpeg, st.st_mode | stat.S_IEXEC)
-        
-        return target_ffmpeg
+        # Pendekatan 3: Fallback mencari secara manual dengan nama package dinamis
+        import glob
+        try:
+            package_name = os.path.basename(app_root)
+            matches = glob.glob(f"/data/app/*/{package_name}-*/lib/*/libffmpeg.so") + glob.glob(f"/data/app/~~*/{package_name}-*/lib/*/libffmpeg.so")
+            if matches:
+                if task_id: ui_queue.put({"type": "log", "task_id": task_id, "text": f"[INFO] Menggunakan FFmpeg native (glob): {matches[0]}\n"})
+                return matches[0]
+        except Exception:
+            pass
+
+        if task_id: ui_queue.put({"type": "log", "task_id": task_id, "text": f"[WARN] libffmpeg.so tidak ditemukan di nativeLibraryDir!\n"})
+        return None
     except Exception as e:
-        if task_id: ui_queue.put({"type": "log", "task_id": task_id, "text": f"[ERROR] Gagal mengatur FFmpeg: {e}\n"})
+        if task_id: ui_queue.put({"type": "log", "task_id": task_id, "text": f"[ERROR] Gagal mencari libffmpeg.so: {e}\n"})
         return None
 
 
