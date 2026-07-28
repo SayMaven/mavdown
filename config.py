@@ -8,12 +8,14 @@ if "__compiled__" in globals() or getattr(sys, 'frozen', False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-YT_DLP_PATH = os.path.join(BASE_DIR, "bin", "yt-dlp.exe")
-ARIA2_PATH = os.path.join(BASE_DIR, "bin", "aria2c.exe")
-FFMPEG_PATH = os.path.join(BASE_DIR, "bin", "ffmpeg.exe") 
-NODE_PATH = os.path.join(BASE_DIR, "bin", "node.exe")
+# Untuk porting ke Android (Flet), kita tidak lagi bergantung pada .exe eksternal.
+# Jika membutuhkan FFmpeg khusus, letakkan di path Android atau gunakan modul eksternal.
 
-DEFAULT_OUTPUT_DIR = os.path.join(BASE_DIR, "downloads")
+DEFAULT_OUTPUT_DIR = os.path.expanduser("~/storage/shared/Download/Mavdown")
+if not os.path.exists(os.path.expanduser("~/storage/shared/Download")):
+    # Fallback ke folder lokal jika tidak berjalan di Android
+    DEFAULT_OUTPUT_DIR = os.path.join(BASE_DIR, "downloads")
+
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 
 def _read_raw_config() -> dict:
@@ -57,3 +59,21 @@ def load_config() -> str:
     if saved_path and os.path.isdir(saved_path):
         return saved_path
     return DEFAULT_OUTPUT_DIR
+
+def get_full_config() -> dict:
+    """Mengembalikan semua konfigurasi dengan default fallback."""
+    data = _read_raw_config()
+    default_config = {
+        "output_path": DEFAULT_OUTPUT_DIR,
+        "theme": "dark",
+        "language": "id"
+    }
+    # Timpa default dengan apa yang tersimpan
+    for k, v in default_config.items():
+        if k not in data:
+            data[k] = v
+    return data
+
+def save_full_config(data: dict):
+    """Menimpa keseluruhan konfigurasi."""
+    _write_raw_config(data)

@@ -1,5 +1,5 @@
-from gui import App
+import flet as ft
+from gui import main
 
 if __name__ == "__main__":
-    app = App()
-    app.mainloop()
+    ft.run(main)

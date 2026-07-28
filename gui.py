@@ -1,1407 +1,865 @@
-import os
-import sys
-import re
-import subprocess
+import flet as ft
 import threading
-import queue
-from io import BytesIO
-from PIL import Image
-import customtkinter as ctk
-from tkinter import filedialog
+import uuid
+import webbrowser
+import os
+import re
 
-from config import BASE_DIR, DEFAULT_OUTPUT_DIR, load_config, save_config
-from downloader import (
-    ui_queue, get_video_info, download_video_logic,
-    stop_current_process, update_ytdlp_logic
-)
+from config import load_config, save_config, get_full_config, save_full_config, DEFAULT_OUTPUT_DIR
+from downloader import download_video_logic, download_state, ui_queue, get_video_info
 
-# ---------------------------------------------------------------------------
-# Pemetaan Bahasa Subtitle / Lirik
-# ---------------------------------------------------------------------------
-LANG_PRESETS = {
-    "🇮🇩 Indonesia & 🇬🇧 English": "id,en",
-    "🇮🇩 Bahasa Indonesia": "id",
-    "🇬🇧 English": "en",
-    "🇯🇵 Jepang (Japanese)": "ja",
-    "🇨🇳 Cina (Chinese)": "zh",
-    "🇰🇷 Korea (Korean)": "ko",
-    "🇪🇸 Spanyol (Spanish)": "es",
-    "🌐 Semua Bahasa (All)": "all",
-    "✏️ Custom / Manual": "custom"
+# Global App State
+app_state = {
+    "tasks": {},
+    "current_video_info": None
 }
 
-# ---------------------------------------------------------------------------
-# Deteksi Platform dari URL
-# ---------------------------------------------------------------------------
-PLATFORM_PATTERNS = [
-    (r'youtu\.be|youtube\.com',       "🔴 YouTube",       "#FF4444"),
-    (r'tiktok\.com',                   "🎵 TikTok",        "#69C9D0"),
-    (r'instagram\.com',                "📸 Instagram",     "#E1306C"),
-    (r'soundcloud\.com',               "☁️ SoundCloud",    "#FF7700"),
-    (r'twitter\.com|x\.com',           "🐦 Twitter/X",     "#1D9BF0"),
-    (r'facebook\.com|fb\.watch',       "👤 Facebook",      "#1877F2"),
-    (r'vimeo\.com',                    "🎬 Vimeo",         "#1AB7EA"),
-    (r'twitch\.tv',                    "💜 Twitch",        "#9146FF"),
-    (r'nicovideo\.jp|nico\.ms',        "🇯🇵 NicoNico",    "#E6E6E6"),
-    (r'dailymotion\.com',              "🎥 Dailymotion",   "#0066DC"),
-    (r'reddit\.com',                   "🟠 Reddit",        "#FF4500"),
-    (r'bilibili\.com',                 "📺 Bilibili",      "#00A1D6"),
-    (r'pinterest\.com',                "📌 Pinterest",     "#E60023"),
-]
+def main(page: ft.Page):
+    # ===========================================================================
+    # 1. CORE THEME & SETUP
+    # ===========================================================================
+    page.title = "Mavdown"
+    
+    # Modern Android Standard DPI Size
+    page.window.width = 412
+    page.window.height = 892
+    
+    # Material 3 Setup (Phase 4 requirement: strictly follow M3 guidelines)
+    # Seed color requested by user: #99DD88 (Green)
+    page.theme = ft.Theme(
+        color_scheme_seed="#99DD88",
+        use_material3=True
+    )
+    
+    cfg_init = get_full_config()
+    is_dark = (cfg_init.get("theme", "dark") == "dark")
+    page.theme_mode = ft.ThemeMode.DARK if is_dark else ft.ThemeMode.LIGHT
 
-# ---------------------------------------------------------------------------
-# Tab Name Constants
-# ---------------------------------------------------------------------------
-TAB_UNDUH = "⚡ Unduh"
-TAB_ANTEAN = "📋 Antrean"
-TAB_LOG = "📜 Log"
+    download_config = {
+        "type": "video",
+        "format_mode": "auto",
+        "video_preset": "kualitas",
+        "video_res": "best",
+        "audio_format": "m4a",
+        "convert_audio": "none",
+        "download_subs": False,
+        "subs_lang": "id,en",
+        "embed_thumb": True,
+        "download_playlist": False,
+        "custom_cmd_template": ""
+    }
 
-# ---------------------------------------------------------------------------
-# Quick Preset Profiles
-# ---------------------------------------------------------------------------
-QUICK_PRESETS = {
-    "🎬 Super Quality": {
-        "mode": "video_audio", "container": "mp4", "resolution": "best",
-        "video_codec": "best", "audio_codec": "best",
-        "audio_format": "mp3", "embed_thumb": True,
-        "label_v": "MP4", "label_c": "Auto", "label_a": "Auto", "label_r": "Best"
-    },
-    "🎵 Musik MP3": {
-        "mode": "audio_only", "container": "mp4", "resolution": "1080",
-        "video_codec": "best", "audio_codec": "best",
-        "audio_format": "mp3", "embed_thumb": True,
-        "label_v": "MP4", "label_c": "Auto", "label_a": "Auto", "label_r": "1080p"
-    },
-    "📱 Hemat Data": {
-        "mode": "video_audio", "container": "mp4", "resolution": "720",
-        "video_codec": "h264", "audio_codec": "best",
-        "audio_format": "mp3", "embed_thumb": True,
-        "label_v": "MP4", "label_c": "H.264", "label_a": "Auto", "label_r": "720p"
-    },
-    "🎙️ Podcast": {
-        "mode": "audio_only", "container": "mp4", "resolution": "1080",
-        "video_codec": "best", "audio_codec": "best",
-        "audio_format": "m4a", "embed_thumb": True,
-        "label_v": "MP4", "label_c": "Auto", "label_a": "Auto", "label_r": "1080p"
-    },
-}
+    current_view = ["home"]
+    main_container = ft.Container(expand=True)
+    
+    def show_toast(msg):
+        page.overlay.append(ft.SnackBar(content=ft.Text(msg), open=True))
+        page.update()
 
+    # ===========================================================================
+    # 2. APP BAR (NATIVE SEAL STYLE)
+    # ===========================================================================
+    app_bar = ft.Row([
+        ft.IconButton(ft.Icons.SETTINGS_OUTLINED, icon_size=24, tooltip="Pengaturan", on_click=lambda e: switch_view("settings")),
+        ft.Row([
+            ft.IconButton(ft.Icons.TERMINAL_OUTLINED, icon_size=24, tooltip="Log Console", on_click=lambda e: switch_view("log")),
+        ], spacing=4)
+    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
 
-# ===========================================================================
-# Settings Window
-# ===========================================================================
-class SettingsWindow(ctk.CTkToplevel):
-    def __init__(self, parent, current_path: str = "", on_save=None):
-        super().__init__(parent)
-        self.title("⚙️ Pengaturan Maven Downloader")
-        self.geometry("480x260")
-        self.resizable(False, False)
-        self.transient(parent)
-        self.grab_set()
-        self.configure(fg_color="#0F1017")
-        self.on_save_callback = on_save
+    # ===========================================================================
+    # 3. HOME VIEW (NATIVE M3 UI)
+    # ===========================================================================
+    header_title = ft.Text("Mavdown", size=36, weight="w900", color=ft.Colors.ON_SURFACE)
+    
+    platform_chip = ft.Container(
+        content=ft.Text("", color=ft.Colors.ON_PRIMARY_CONTAINER, size=11, weight="bold"),
+        bgcolor=ft.Colors.PRIMARY_CONTAINER,
+        padding=ft.Padding(8, 4, 8, 4),
+        border_radius=16,
+        visible=False
+    )
 
-        self.update_idletasks()
-        px = parent.winfo_x() + (parent.winfo_width() - 480) // 2
-        py = parent.winfo_y() + (parent.winfo_height() - 260) // 2
-        self.geometry(f"480x260+{px}+{py}")
+    def detect_platform(url):
+        if "youtube.com" in url or "youtu.be" in url:
+            return "YouTube"
+        elif "twitter.com" in url or "x.com" in url:
+            return "X (Twitter)"
+        elif "tiktok.com" in url:
+            return "TikTok"
+        elif "instagram.com" in url:
+            return "Instagram"
+        return None
 
-        self._build_ui(current_path)
+    def fetch_info_logic(url):
+        try:
+            info_title_text.value = "Menganalisa tautan..."
+            meta_channel_text.value = "Mohon tunggu sebentar..."
+            meta_duration_text.value = ""
+            info_image_container.visible = False
+            info_card.visible = True
+            page.update()
+            
+            info = get_video_info(url)
+            app_state["current_video_info"] = info
+            title = info.get("title") or "Video"
+            info_title_text.value = title
+            
+            thumb = info.get("thumbnail")
+            if thumb:
+                info_image.src = thumb
+                info_image_container.visible = True
+            else:
+                info_image_container.visible = False
+                
+            uploader = info.get("uploader") or info.get("extractor") or ""
+            meta_channel_text.value = uploader
+            
+            duration = info.get("duration")
+            if duration:
+                mins, secs = divmod(duration, 60)
+                meta_duration_text.value = f"{mins}:{secs:02d}"
+            else:
+                meta_duration_text.value = ""
+                
+            info_card.visible = True
+            page.update()
+        except Exception as ex:
+            print(f"Error fetching info: {ex}")
+            info_title_text.value = "Gagal mengambil info"
+            meta_channel_text.value = str(ex)
+            info_image_container.visible = False
+            info_card.visible = True
+            page.update()
 
-    def _build_ui(self, current_path: str):
-        hdr = ctk.CTkFrame(self, fg_color="#181A24", corner_radius=0, height=55)
-        hdr.pack(fill="x")
-        hdr.pack_propagate(False)
-        ctk.CTkLabel(
-            hdr, text="⚙️  Pengaturan",
-            font=ctk.CTkFont(family="Inter", size=16, weight="bold"),
-            text_color="#F3F4F6"
-        ).pack(side="left", padx=20)
+    def on_url_change(e):
+        name = detect_platform(url_input.value)
+        if name:
+            platform_chip.content.value = name
+            platform_chip.visible = True
+        else:
+            platform_chip.visible = False
+            
+        url = url_input.value.strip()
+        if url.startswith("http://") or url.startswith("https://"):
+            if app_state["current_video_info"] is None or app_state["current_video_info"].get("webpage_url") != url:
+                # Reset and show loading state if needed
+                app_state["current_video_info"] = None
+                threading.Thread(target=fetch_info_logic, args=(url,), daemon=True).start()
+        else:
+            info_card.visible = False
+            app_state["current_video_info"] = None
+        page.update()
 
-        body = ctk.CTkFrame(self, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=20, pady=16)
+    url_input = ft.TextField(
+        label="Tautan video",
+        hint_text="Tempelkan link video di sini...",
+        border_radius=16,
+        expand=True,
+        on_change=on_url_change,
+        content_padding=16,
+        filled=True,
+        border_color=ft.Colors.TRANSPARENT,
+        bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+        prefix_icon=ft.Icons.LINK_ROUNDED
+    )
 
-        sec_dir = ctk.CTkFrame(body, fg_color="#181A24", corner_radius=12)
-        sec_dir.pack(fill="x", pady=(0, 16))
-        inner_dir = ctk.CTkFrame(sec_dir, fg_color="transparent")
-        inner_dir.pack(fill="x", padx=16, pady=14)
+    async def paste_url_action(e):
+        try:
+            clip = await page.clipboard.get()
+            if clip and isinstance(clip, str):
+                url_input.value = clip
+                on_url_change(None)
+                show_toast("Tautan berhasil ditempel! 📋")
+                page.update()
+        except Exception:
+            pass
 
-        ctk.CTkLabel(
-            inner_dir, text="📁  Folder Output Unduhan Default",
-            font=ctk.CTkFont(size=13, weight="bold"), text_color="#F3F4F6"
-        ).pack(anchor="w", pady=(0, 8))
+    # Media Info Preview Card (Seal Style M3)
+    info_title_text = ft.Text("", size=16, weight="bold", selectable=True, color=ft.Colors.ON_SURFACE, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS)
+    info_image = ft.Image(src="", fit="cover", expand=True)
+    info_image_container = ft.Container(
+        content=info_image, 
+        aspect_ratio=16/9,
+        border_radius=ft.BorderRadius(16, 16, 0, 0),
+        clip_behavior=ft.ClipBehavior.ANTI_ALIAS, 
+        visible=False
+    )
+    
+    meta_channel_text = ft.Text("", size=13, color=ft.Colors.ON_SURFACE_VARIANT, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+    meta_duration_text = ft.Text("", size=13, color=ft.Colors.ON_SURFACE_VARIANT)
 
-        dir_row = ctk.CTkFrame(inner_dir, fg_color="transparent")
-        dir_row.pack(fill="x")
+    info_card = ft.Container(
+        content=ft.Column([
+            info_image_container,
+            ft.Container(
+                content=ft.Column([
+                    info_title_text,
+                    ft.Row([meta_channel_text, ft.Container(expand=True), meta_duration_text], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+                ], spacing=4),
+                padding=ft.Padding(16, 12, 16, 16)
+            )
+        ], spacing=0),
+        bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+        border_radius=16,
+        border=ft.Border.all(1, ft.Colors.SURFACE_CONTAINER_HIGHEST),
+        visible=False
+    )
 
-        self.path_var = ctk.StringVar(value=current_path)
-        self.path_entry = ctk.CTkEntry(
-            dir_row, textvariable=self.path_var,
-            height=36, corner_radius=8,
-            border_color="#2D3142", fg_color="#10111A", text_color="#F3F4F6"
+    home_view = ft.ListView(
+        expand=True,
+        padding=ft.Padding(16, 0, 16, 16),
+        spacing=16,
+        controls=[
+            app_bar,
+            ft.Container(height=10),
+            header_title,
+            ft.Container(height=16),
+            info_card,
+            url_input
+        ]
+    )
+
+    # ===========================================================================
+    # 4. PREFERENCE DIALOGS (M3)
+    # ===========================================================================
+    def get_convert_label():
+        c = download_config.get("convert_audio", "none")
+        return "Tidak diubah" if c == "none" else f"Ubah ke {c}"
+
+    def get_audio_fmt_label():
+        return f"Format audio: {download_config.get('audio_format', 'm4a').upper()}"
+
+    def get_video_fmt_label():
+        p = download_config.get("video_preset", "kualitas")
+        return "Lawas" if p == "lawas" else "Kualitas"
+
+    def get_video_qual_label():
+        res_map = {
+            "best": "Kualitas terbaik", "2160": "2160p (4K)", "1440": "1440p", 
+            "1080": "1080p", "720": "720p", "480": "480p", "360": "360p", "worst": "Kualitas rendah"
+        }
+        return res_map.get(download_config.get("video_res", "best"), "Kualitas terbaik")
+
+    def sync_button_labels():
+        btn_convert_audio.text = get_convert_label()
+        btn_audio_fmt.text = get_audio_fmt_label()
+        btn_video_fmt.text = get_video_fmt_label()
+        btn_video_qual.text = get_video_qual_label()
+
+    def open_video_format_dialog(e):
+        def select_preset(val):
+            download_config["video_preset"] = val
+            sync_button_labels()
+            dlg.open = False
+            page.update()
+
+        radio_group = ft.RadioGroup(
+            value=download_config["video_preset"],
+            content=ft.Column([
+                ft.ListTile(leading=ft.Radio(value="lawas"), title=ft.Text("Lawas", weight="bold"), subtitle=ft.Text("Format MP4 (H.264) stabil untuk dibagikan", size=12)),
+                ft.ListTile(leading=ft.Radio(value="kualitas"), title=ft.Text("Kualitas", weight="bold"), subtitle=ft.Text("Format modern AV1/VP9 untuk kualitas tinggi", size=12))
+            ])
         )
-        self.path_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        dlg = ft.AlertDialog(title=ft.Text("Format video pilihan"), content=radio_group, actions=[
+            ft.TextButton("Batalkan", on_click=lambda e: setattr(dlg, 'open', False) or page.update()),
+            ft.TextButton("Konfirmasi", on_click=lambda e: select_preset(radio_group.value))
+        ])
+        page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
 
-        ctk.CTkButton(
-            dir_row, text="Pilih Folder", width=90, height=36,
-            fg_color="#26293B", hover_color="#31354C",
-            command=self._browse_folder
-        ).pack(side="left")
+    def open_video_quality_dialog(e):
+        def confirm_res(val):
+            download_config["video_res"] = val
+            sync_button_labels()
+            dlg.open = False
+            page.update()
+            
+        radio_group = ft.RadioGroup(
+            value=download_config["video_res"],
+            content=ft.Column([
+                ft.ListTile(leading=ft.Radio(value="best"), title=ft.Text("Kualitas terbaik")),
+                ft.ListTile(leading=ft.Radio(value="1080"), title=ft.Text("1080p")),
+                ft.ListTile(leading=ft.Radio(value="720"), title=ft.Text("720p"))
+            ])
+        )
+        dlg = ft.AlertDialog(title=ft.Text("Kualitas video pilihan"), content=radio_group, actions=[
+            ft.TextButton("Batalkan", on_click=lambda e: setattr(dlg, 'open', False) or page.update()),
+            ft.TextButton("Konfirmasi", on_click=lambda e: confirm_res(radio_group.value))
+        ])
+        page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
 
-        ctk.CTkButton(
-            body, text="💾  Simpan Pengaturan",
-            command=self._save,
-            height=42, corner_radius=10,
-            fg_color="#4F46E5", hover_color="#4338CA",
-            font=ctk.CTkFont(size=13, weight="bold")
-        ).pack(fill="x", side="bottom")
+    def open_audio_format_dialog(e):
+        def confirm_aud(val):
+            download_config["audio_format"] = val
+            sync_button_labels()
+            dlg.open = False
+            page.update()
+            
+        radio_group = ft.RadioGroup(
+            value=download_config["audio_format"],
+            content=ft.Column([
+                ft.ListTile(leading=ft.Radio(value="m4a"), title=ft.Text("m4a")),
+                ft.ListTile(leading=ft.Radio(value="webm"), title=ft.Text("webm")),
+                ft.ListTile(leading=ft.Radio(value="mp3"), title=ft.Text("mp3"))
+            ])
+        )
+        dlg = ft.AlertDialog(title=ft.Text("Format audio pilihan"), content=radio_group, actions=[
+            ft.TextButton("Batalkan", on_click=lambda e: setattr(dlg, 'open', False) or page.update()),
+            ft.TextButton("Konfirmasi", on_click=lambda e: confirm_aud(radio_group.value))
+        ])
+        page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
 
-    def _browse_folder(self):
-        folder = filedialog.askdirectory()
-        if folder:
-            self.path_var.set(folder)
+    def open_audio_convert_dialog(e):
+        def confirm_conv(val):
+            download_config["convert_audio"] = val
+            sync_button_labels()
+            dlg.open = False
+            page.update()
+            
+        radio_group = ft.RadioGroup(
+            value=download_config["convert_audio"],
+            content=ft.Column([
+                ft.ListTile(leading=ft.Radio(value="none"), title=ft.Text("Tidak diubah")),
+                ft.ListTile(leading=ft.Radio(value="mp3"), title=ft.Text("mp3"))
+            ])
+        )
+        dlg = ft.AlertDialog(title=ft.Text("Konversi audio"), content=radio_group, actions=[
+            ft.TextButton("Batalkan", on_click=lambda e: setattr(dlg, 'open', False) or page.update()),
+            ft.TextButton("Konfirmasi", on_click=lambda e: confirm_conv(radio_group.value))
+        ])
+        page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
 
-    def _save(self):
-        path = self.path_var.get().strip()
-        if self.on_save_callback:
-            self.on_save_callback(path)
+    # ===========================================================================
+    # 5. BOTTOM SHEET & CUSTOM FORMAT MODAL (M3)
+    # ===========================================================================
+    btn_video_fmt = ft.OutlinedButton(get_video_fmt_label(), on_click=open_video_format_dialog, style=ft.ButtonStyle(color=ft.Colors.ON_SURFACE_VARIANT))
+    btn_video_qual = ft.OutlinedButton(get_video_qual_label(), icon=ft.Icons.HIGH_QUALITY_OUTLINED, on_click=open_video_quality_dialog, style=ft.ButtonStyle(color=ft.Colors.ON_SURFACE_VARIANT))
+    btn_audio_fmt = ft.OutlinedButton(get_audio_fmt_label(), icon=ft.Icons.AUDIO_FILE_OUTLINED, on_click=open_audio_format_dialog, style=ft.ButtonStyle(color=ft.Colors.ON_SURFACE_VARIANT))
+    btn_convert_audio = ft.OutlinedButton(get_convert_label(), icon=ft.Icons.AUTORENEW_ROUNDED, on_click=open_audio_convert_dialog, style=ft.ButtonStyle(color=ft.Colors.ON_SURFACE_VARIANT))
+
+    def create_toggle_button(label, key):
+        def on_click(e):
+            download_config[key] = not download_config[key]
+            e.control.icon = ft.Icons.CHECK if download_config[key] else None
+            e.control.style.bgcolor = ft.Colors.PRIMARY_CONTAINER if download_config[key] else ft.Colors.TRANSPARENT
+            e.control.style.color = ft.Colors.ON_PRIMARY_CONTAINER if download_config[key] else ft.Colors.ON_SURFACE_VARIANT
+            page.update()
+        
+        is_sel = download_config[key]
+        return ft.OutlinedButton(
+            label, 
+            icon=ft.Icons.CHECK if is_sel else None,
+            on_click=on_click,
+            style=ft.ButtonStyle(
+                color=ft.Colors.ON_PRIMARY_CONTAINER if is_sel else ft.Colors.ON_SURFACE_VARIANT,
+                bgcolor=ft.Colors.PRIMARY_CONTAINER if is_sel else ft.Colors.TRANSPARENT,
+            )
+        )
+
+    btn_playlist = create_toggle_button("Unduh daftar putar", "download_playlist")
+    btn_subs = create_toggle_button("Unduh takarir", "download_subs")
+    btn_thumb = create_toggle_button("Simpan thumbnail", "embed_thumb")
+
+    pref_single_row = ft.Row([btn_audio_fmt, btn_convert_audio], scroll=ft.ScrollMode.HIDDEN, spacing=8)
+    text_pref = ft.Text("Preferensi format", size=13, color=ft.Colors.PRIMARY)
+
+    def update_pref_row():
+        val = download_config["type"]
+        text_pref.visible = True
+        pref_single_row.visible = True
+        if val == "video":
+            pref_single_row.controls = [btn_video_fmt, btn_video_qual, btn_audio_fmt, btn_convert_audio]
+        elif val == "audio":
+            pref_single_row.controls = [btn_audio_fmt, btn_convert_audio]
+        else:
+            pref_single_row.controls = []
+        page.update()
+
+    # Custom M3 Segmented Button using a Row
+    def on_type_change(idx):
+        download_config["type"] = "audio" if idx == 0 else "video"
+        update_type_ui()
+        update_pref_row()
+        
+    def update_type_ui():
+        is_aud = download_config["type"] == "audio"
+        btn_type_aud.bgcolor = ft.Colors.ON_SURFACE_VARIANT if is_aud else ft.Colors.TRANSPARENT
+        btn_type_aud.content.color = ft.Colors.SURFACE if is_aud else ft.Colors.ON_SURFACE_VARIANT
+        btn_type_aud.content.value = "✓ Audio" if is_aud else "Audio"
+        
+        btn_type_vid.bgcolor = ft.Colors.ON_SURFACE_VARIANT if not is_aud else ft.Colors.TRANSPARENT
+        btn_type_vid.content.color = ft.Colors.SURFACE if not is_aud else ft.Colors.ON_SURFACE_VARIANT
+        btn_type_vid.content.value = "✓ Video" if not is_aud else "Video"
+        page.update()
+
+    btn_type_aud = ft.Container(content=ft.Text("Audio", size=13, text_align=ft.TextAlign.CENTER), expand=True, on_click=lambda e: on_type_change(0), border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT), border_radius=ft.BorderRadius(20, 0, 0, 20), padding=8)
+    btn_type_vid = ft.Container(content=ft.Text("✓ Video", size=13, text_align=ft.TextAlign.CENTER, color=ft.Colors.SURFACE), expand=True, bgcolor=ft.Colors.ON_SURFACE_VARIANT, on_click=lambda e: on_type_change(1), border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT), border_radius=ft.BorderRadius(0, 20, 20, 0), padding=8)
+    
+    type_segmented = ft.Row([btn_type_aud, btn_type_vid], spacing=0)
+
+    def on_format_mode_change(idx):
+        download_config["format_mode"] = "auto" if idx == 0 else "custom"
+        update_format_mode_ui()
+        update_pref_row()
+        
+    def update_format_mode_ui():
+        is_auto = download_config["format_mode"] == "auto"
+        btn_fmt_auto.bgcolor = ft.Colors.ON_SURFACE_VARIANT if is_auto else ft.Colors.TRANSPARENT
+        btn_fmt_auto.content.color = ft.Colors.SURFACE if is_auto else ft.Colors.ON_SURFACE_VARIANT
+        btn_fmt_auto.content.value = "✓ Otomatis" if is_auto else "Otomatis"
+        
+        btn_fmt_cust.bgcolor = ft.Colors.ON_SURFACE_VARIANT if not is_auto else ft.Colors.TRANSPARENT
+        btn_fmt_cust.content.color = ft.Colors.SURFACE if not is_auto else ft.Colors.ON_SURFACE_VARIANT
+        btn_fmt_cust.content.value = "✓ Kustom" if not is_auto else "Kustom"
+        page.update()
+
+    btn_fmt_auto = ft.Container(content=ft.Text("✓ Otomatis", size=13, text_align=ft.TextAlign.CENTER, color=ft.Colors.SURFACE), width=120, bgcolor=ft.Colors.ON_SURFACE_VARIANT, on_click=lambda e: on_format_mode_change(0), border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT), border_radius=ft.BorderRadius(20, 0, 0, 20), padding=8)
+    btn_fmt_cust = ft.Container(content=ft.Text("Kustom", size=13, text_align=ft.TextAlign.CENTER), width=120, on_click=lambda e: on_format_mode_change(1), border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT), border_radius=ft.BorderRadius(0, 20, 20, 0), padding=8)
+    
+    format_mode_segmented = ft.Row([btn_fmt_auto, btn_fmt_cust], spacing=0)
+
+    def open_format_selection_dialog(info):
+        formats = info.get("formats", [])
+        suggested = []
+        video_only = []
+        audio_only = []
+        
+        def fmt_size(sz):
+            if not sz: return "Unknown size"
+            return f"{sz / 1024 / 1024:.2f} MB"
+            
+        for f in formats:
+            vcodec = str(f.get("vcodec", "none"))
+            acodec = str(f.get("acodec", "none"))
+            ext = str(f.get("ext", ""))
+            
+            if ext in ["mhtml", "weba", "mha"] or f.get("format_note") == "storyboard":
+                continue
+                
+            fid = str(f.get("format_id", ""))
+            res = str(f.get("resolution", "")) or f"{f.get('width', '')}x{f.get('height', '')}"
+            if res == "x" or res == "NonexNone": res = "audio only"
+            if res == "audio only":
+                res += f" ({f.get('format_note', 'medium')})"
+            else:
+                res += f" ({f.get('format_note', '')})"
+                
+            fs_str = fmt_size(f.get("filesize") or f.get("filesize_approx"))
+            tbr = f.get("tbr", 0)
+            tbr_str = f"{tbr} Kbps" if tbr else ""
+            
+            label = f"{fid} - {res}\n{fs_str} {tbr_str}\n{ext.upper()} ({vcodec} {acodec})".strip()
+            item = ft.Radio(value=fid, label=label)
+            
+            if vcodec != "none" and acodec != "none":
+                suggested.append(item)
+            elif vcodec != "none":
+                video_only.append(item)
+            elif acodec != "none":
+                audio_only.append(item)
+                
+        rg_sug = ft.RadioGroup(content=ft.Column(suggested))
+        rg_vid = ft.RadioGroup(content=ft.Column(video_only))
+        rg_aud = ft.RadioGroup(content=ft.Column(audio_only))
+        
+        def confirm_custom(e):
+            try:
+                dlg.open = False
+                page.update()
+                
+                s_id = rg_sug.value
+                v_id = rg_vid.value
+                a_id = rg_aud.value
+                
+                if s_id:
+                    fmt_str = s_id
+                elif v_id and a_id:
+                    fmt_str = f"{v_id}+{a_id}"
+                elif v_id:
+                    fmt_str = v_id
+                elif a_id:
+                    fmt_str = a_id
+                else:
+                    show_toast("Pilih format terlebih dahulu!")
+                    return
+                    
+                task_id = str(uuid.uuid4())
+                container = "mp4"
+                args = (
+                    task_id,
+                    url_input.value.strip(),
+                    "video_audio", 
+                    download_config["audio_format"],
+                    "best",
+                    f"override:{fmt_str}", 
+                    "best",
+                    container,
+                    chip_subs.selected,
+                    chip_subs.selected,
+                    download_config["subs_lang"],
+                    chip_thumb.selected,
+                    chip_playlist.selected,
+                    get_full_config().get("output_path", DEFAULT_OUTPUT_DIR),
+                    ""
+                )
+                
+                title = "Video"
+                thumb_url = ""
+                if app_state.get("current_video_info"):
+                    title = app_state["current_video_info"].get("title") or "Video"
+                    thumb_url = app_state["current_video_info"].get("thumbnail") or ""
+                    
+                create_task_card(task_id, title, thumb_url)
+                switch_view("tasks")
+                
+                threading.Thread(target=download_video_logic, args=args, daemon=True).start()
+            except Exception as ex:
+                show_toast(f"Error kustom: {ex}")
+
+        dlg = ft.AlertDialog(
+            title=ft.Row([ft.Text("Format selection", weight="bold", color=ft.Colors.ON_SURFACE), ft.TextButton("Unduh", on_click=confirm_custom)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            content=ft.Column([
+                ft.Text("Suggested", weight="bold", color=ft.Colors.PRIMARY, visible=bool(suggested)),
+                ft.Container(content=rg_sug, padding=10, border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT), border_radius=12, visible=bool(suggested)),
+                ft.Text("Video", weight="bold", color=ft.Colors.PRIMARY, visible=bool(video_only)),
+                ft.Container(content=rg_vid, padding=10, border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT), border_radius=12, visible=bool(video_only)),
+                ft.Text("Audio", weight="bold", color=ft.Colors.PRIMARY, visible=bool(audio_only)),
+                ft.Container(content=rg_aud, padding=10, border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT), border_radius=12, visible=bool(audio_only)),
+            ], scroll=ft.ScrollMode.HIDDEN, height=450),
+            actions=[
+                ft.TextButton("Batalkan", on_click=lambda e: setattr(dlg, 'open', False) or page.update()),
+            ]
+        )
+        page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
+
+    def start_download_from_bs(e):
         try:
-            self.grab_release()
-        except Exception:
-            pass
-        self.after(20, self.destroy)
+            bs.open = False
+            page.update()
+            
+            if not url_input.value:
+                show_toast("Harap isi tautan video terlebih dahulu!")
+                return
 
+            is_custom = (download_config["format_mode"] == "custom")
+            
+            if is_custom:
+                if not app_state.get("current_video_info"):
+                    show_toast("Harap tunggu info video selesai dimuat... ⏳")
+                    return
+                open_format_selection_dialog(app_state["current_video_info"])
+                return
 
-# ===========================================================================
-# Main Application
-# ===========================================================================
-class App(ctk.CTk):
-    def __init__(self):
-        super().__init__()
-        self.title("Maven Downloader")
-        self.geometry("1440x880")
-        self.minsize(1200, 780)
+            task_id = str(uuid.uuid4())
+            is_audio = (download_config["type"] == "audio")
+            mode = "audio_only" if is_audio else "video_audio"
+            audio_fmt = download_config["convert_audio"] if download_config["convert_audio"] != "none" else download_config["audio_format"]
+            res = download_config["video_res"]
+            vcodec = "h264" if download_config["video_preset"] == "lawas" else "best"
+            container = "mp4"
 
-        ctk.set_appearance_mode("Dark")
-        ctk.set_default_color_theme("blue")
+            args = (
+                task_id,
+                url_input.value.strip(),
+                mode,
+                audio_fmt,
+                res,
+                vcodec,
+                "best",
+                container,
+                download_config["download_subs"],
+                download_config["download_subs"],
+                download_config["subs_lang"],
+                download_config["embed_thumb"],
+                download_config["download_playlist"],
+                get_full_config().get("output_path", DEFAULT_OUTPUT_DIR),
+                ""
+            )
+            
+            title = "Video"
+            thumb_url = ""
+            if app_state.get("current_video_info"):
+                title = app_state["current_video_info"].get("title") or "Video"
+                thumb_url = app_state["current_video_info"].get("thumbnail") or ""
+                
+            create_task_card(task_id, title, thumb_url)
+            switch_view("tasks")
+            
+            threading.Thread(target=download_video_logic, args=args, daemon=True).start()
+        except Exception as ex:
+            show_toast(f"Error start: {ex}")
 
-        try:
-            icon_path = os.path.join(BASE_DIR, "assets", "waifu_icon.ico")
-            self.iconbitmap(icon_path)
-        except Exception:
-            pass
+    bs = ft.BottomSheet(
+        ft.Container(
+            padding=ft.Padding(16, 12, 16, 24),
+            bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+            border_radius=ft.BorderRadius(top_left=24, top_right=24, bottom_left=0, bottom_right=0),
+            content=ft.Column([
+                ft.Container(
+                    content=ft.Icon(ft.Icons.DONE_ALL, size=24, color=ft.Colors.ON_SURFACE_VARIANT),
+                    alignment=ft.Alignment(0, 0)
+                ),
+                ft.Container(
+                    content=ft.Text("Konfigurasikan sebelum unduh", size=20, color=ft.Colors.ON_SURFACE, text_align=ft.TextAlign.CENTER),
+                    alignment=ft.Alignment(0, 0),
+                    margin=ft.Margin(0, 8, 0, 4)
+                ),
+                ft.Container(
+                    content=ft.Text("Sesuaikan unduhan ini", size=13, color=ft.Colors.ON_SURFACE_VARIANT, text_align=ft.TextAlign.CENTER),
+                    alignment=ft.Alignment(0, 0),
+                    margin=ft.Margin(0, 0, 0, 16)
+                ),
+                ft.Text("Jenis pengunduhan", size=13, color=ft.Colors.PRIMARY),
+                type_segmented,
+                ft.Container(height=4),
+                ft.Text("Pilihan format", size=13, color=ft.Colors.PRIMARY),
+                format_mode_segmented,
+                ft.Container(height=4),
+                text_pref,
+                pref_single_row,
+                ft.Container(height=4),
+                ft.Text("Pengaturan tambahan", size=13, color=ft.Colors.PRIMARY),
+                ft.Row([btn_playlist, btn_subs, btn_thumb], scroll=ft.ScrollMode.HIDDEN, spacing=8),
+                ft.Container(height=16),
+                ft.Row([
+                    ft.OutlinedButton("Batalkan", icon=ft.Icons.CANCEL_OUTLINED, on_click=lambda e: setattr(bs, 'open', False) or page.update(), style=ft.ButtonStyle(color=ft.Colors.ON_SURFACE_VARIANT)),
+                    ft.FilledButton("Unduh", icon=ft.Icons.DOWNLOAD_ROUNDED, on_click=start_download_from_bs, expand=True)
+                ])
+            ], tight=True)
+        ),
+        scrollable=True,
+        show_drag_handle=True
+    )
+    page.overlay.append(bs)
 
-        # ── Download option state vars ──────────────────────────────────────
-        self.mode_var = ctk.StringVar(value="video_audio")
-        self.custom_cmd_var = ctk.StringVar()
-        self.custom_output_path_var = ctk.StringVar(value=load_config())
-        self.audio_only_format_var = ctk.StringVar(value="mp3")
-        self.resolution_var = ctk.StringVar(value="1080")
-        self.video_codec_var = ctk.StringVar(value="best")
-        self.audio_codec_var = ctk.StringVar(value="best")
-        self.container_var = ctk.StringVar(value="mp4")
-        self.download_subs_var = ctk.BooleanVar(value=False)
-        self.embed_subs_var = ctk.BooleanVar(value=False)
-        self.subs_lang_var = ctk.StringVar(value="id,en")
-        self.embed_thumb_var = ctk.BooleanVar(value=True)
-        self.use_aria2_var = ctk.BooleanVar(value=False)
-        self.download_playlist_var = ctk.BooleanVar(value=False)
+    def open_download_modal(e):
+        update_pref_row()
+        bs.open = True
+        page.update()
 
-        # ── App state ────────────────────────────────────────────────────────
-        self.last_video_info: dict = {}
-        self._last_log_text: str = ""
-        self._settings_window = None
-        self._platform_badge_label = None
-        # Track whether the dynamic info section has been shown yet
-        self._info_container_shown: bool = False
-        self._active_thumb_image = None
-        # Batch queue coordination
-        self._queue_done_event = threading.Event()
-        self._queue_running: bool = False
+    fab_column = ft.Column([
+        ft.FloatingActionButton(icon=ft.Icons.CONTENT_PASTE_ROUNDED, on_click=paste_url_action, bgcolor=ft.Colors.SECONDARY_CONTAINER, shape=ft.RoundedRectangleBorder(radius=16)),
+        ft.FloatingActionButton(icon=ft.Icons.DOWNLOAD_ROUNDED, on_click=open_download_modal, bgcolor=ft.Colors.PRIMARY_CONTAINER, shape=ft.RoundedRectangleBorder(radius=16))
+    ], alignment=ft.MainAxisAlignment.END, horizontal_alignment=ft.CrossAxisAlignment.END, spacing=16)
 
-        self.setup_ui()
-        self.after(100, self.process_ui_queue)
+    # ===========================================================================
+    # 6. TASKS TAB (M3 CARDS)
+    # ===========================================================================
+    tasks_empty_placeholder = ft.Container(
+        content=ft.Column([
+            ft.Icon(ft.Icons.DOWNLOAD_DONE_ROUNDED, size=72, color=ft.Colors.OUTLINE),
+            ft.Text("Belum ada tugas", size=18, weight="bold", color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Text("Tugas unduhan akan muncul di sini.", size=13, color=ft.Colors.ON_SURFACE_VARIANT)
+        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+        alignment=ft.Alignment(0, 0),
+        padding=60
+    )
 
-    # =========================================================================
-    # UI Queue Processor
-    # =========================================================================
-    def process_ui_queue(self):
-        try:
-            while True:
-                msg = ui_queue.get_nowait()
+    tasks_list_view = ft.ListView(expand=True, spacing=12, controls=[tasks_empty_placeholder])
+
+    def stop_task(task_id):
+        if task_id in download_state:
+            download_state[task_id]["is_cancelled"] = True
+            show_toast(f"Membatalkan tugas...")
+
+    def create_task_card(task_id, title, thumb_url):
+        pb = ft.ProgressBar(value=0, color=ft.Colors.PRIMARY, bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST, height=6)
+        pt = ft.Text("Status: Memulai...", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
+        st = ft.Text("", size=11, color=ft.Colors.ON_SURFACE_VARIANT)
+        cancel_btn = ft.IconButton(ft.Icons.CANCEL_OUTLINED, icon_color=ft.Colors.ERROR, on_click=lambda e: stop_task(task_id))
+        
+        thumb = ft.Image(src=thumb_url, width=72, height=72, fit="cover", border_radius=12) if thumb_url else ft.Icon(ft.Icons.VIDEO_FILE, size=40, color=ft.Colors.ON_SURFACE_VARIANT)
+        
+        card = ft.Container(
+            content=ft.Row([
+                ft.Container(content=thumb, width=72, height=72, border_radius=12, bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST, alignment=ft.Alignment(0, 0)),
+                ft.Column([
+                    ft.Text(title, weight="bold", size=14, color=ft.Colors.ON_SURFACE, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                    pb,
+                    ft.Row([pt, st], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+                ], expand=True, spacing=6),
+                cancel_btn
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.START),
+            padding=16,
+            bgcolor=ft.Colors.SURFACE_CONTAINER,
+            border_radius=20
+        )
+        
+        app_state["tasks"][task_id] = {
+            "card": card, "progress_bar": pb, "progress_text": pt, "stats_text": st, "cancel_btn": cancel_btn
+        }
+        
+        if tasks_empty_placeholder in tasks_list_view.controls:
+            tasks_list_view.controls.remove(tasks_empty_placeholder)
+            
+        tasks_list_view.controls.insert(0, card)
+        page.update()
+
+    active_task_filter = ["Semua"]
+    def set_task_filter(filter_name):
+        active_task_filter[0] = filter_name
+        chip_all.selected = (filter_name == "Semua")
+        chip_running.selected = (filter_name == "Berjalan")
+        chip_canceled.selected = (filter_name == "Dibatalkan")
+        chip_finished.selected = (filter_name == "Selesai")
+        page.update()
+
+    chip_all = ft.Chip(label=ft.Text("Semua"), selected=True, on_click=lambda e: set_task_filter("Semua"))
+    chip_running = ft.Chip(label=ft.Text("Berjalan"), selected=False, on_click=lambda e: set_task_filter("Berjalan"))
+    chip_canceled = ft.Chip(label=ft.Text("Dibatalkan"), selected=False, on_click=lambda e: set_task_filter("Dibatalkan"))
+    chip_finished = ft.Chip(label=ft.Text("Selesai"), selected=False, on_click=lambda e: set_task_filter("Selesai"))
+
+    tasks_view = ft.Container(
+        content=ft.Column([
+            ft.Row([
+                ft.Text("Tugas", size=32, weight="w900", color=ft.Colors.ON_SURFACE),
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            ft.Row([chip_all, chip_running, chip_canceled, chip_finished], scroll=ft.ScrollMode.HIDDEN, spacing=8),
+            ft.Container(height=8),
+            tasks_list_view
+        ], expand=True),
+        expand=True, padding=ft.Padding(16, 0, 16, 0)
+    )
+
+    # ===========================================================================
+    # 7. LOG CONSOLE (M3)
+    # ===========================================================================
+    log_text = ft.Text(size=12, font_family="Consolas", selectable=True, color=ft.Colors.ON_SURFACE)
+    log_view_container = ft.Container(
+        content=ft.Column([
+            ft.Row([
+                ft.IconButton(ft.Icons.ARROW_BACK, on_click=lambda e: switch_view("home")),
+                ft.Text("Log Console", size=24, weight="w900", color=ft.Colors.ON_SURFACE)
+            ], alignment=ft.MainAxisAlignment.START),
+            ft.Container(
+                content=ft.ListView(controls=[log_text], auto_scroll=True, expand=True),
+                expand=True,
+                bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+                border_radius=16,
+                padding=16
+            )
+        ], expand=True),
+        expand=True, padding=ft.Padding(16, 0, 16, 16)
+    )
+
+    # ===========================================================================
+    # 8. SETTINGS VIEW (M3 FULL PAGE)
+    # ===========================================================================
+    settings_view_container = ft.Container(
+        content=ft.Column([
+            ft.Row([
+                ft.IconButton(ft.Icons.ARROW_BACK, on_click=lambda e: switch_view("home")),
+                ft.Text("Pengaturan", size=24, weight="w900", color=ft.Colors.ON_SURFACE)
+            ]),
+            ft.ListView([
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.DARK_MODE, color=ft.Colors.PRIMARY),
+                    title=ft.Text("Tema Gelap", weight="bold"),
+                    subtitle=ft.Text("Tampilan antarmuka", color=ft.Colors.ON_SURFACE_VARIANT),
+                    trailing=ft.Switch(
+                        value=(page.theme_mode == ft.ThemeMode.DARK),
+                        on_change=lambda e: setattr(page, 'theme_mode', ft.ThemeMode.DARK if e.control.value else ft.ThemeMode.LIGHT) or page.update() or save_full_config({"theme": "dark" if e.control.value else "light"}),
+                        active_color=ft.Colors.PRIMARY
+                    )
+                ),
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.FOLDER_ROUNDED, color=ft.Colors.PRIMARY),
+                    title=ft.Text("Lokasi Unduhan", weight="bold"),
+                    subtitle=ft.Text(cfg_init.get("output_path", DEFAULT_OUTPUT_DIR), color=ft.Colors.ON_SURFACE_VARIANT),
+                    on_click=lambda e: show_toast("Fitur pilih direktori")
+                ),
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.INFO_ROUNDED, color=ft.Colors.PRIMARY),
+                    title=ft.Text("Tentang Mavdown", weight="bold"),
+                    subtitle=ft.Text("Versi 1.0 (Material 3 Native)", color=ft.Colors.ON_SURFACE_VARIANT)
+                )
+            ], expand=True)
+        ], expand=True),
+        expand=True, padding=ft.Padding(16, 0, 16, 16)
+    )
+
+    # ===========================================================================
+    # 9. QUEUE PROCESSING & VIEW SWITCHER
+    # ===========================================================================
+    def switch_view(target: str):
+        current_view[0] = target
+        if target == "home":
+            main_container.content = home_view
+            page.floating_action_button = fab_column
+            if page.navigation_bar:
+                page.navigation_bar.visible = True
+                page.navigation_bar.selected_index = 0
+        elif target == "tasks":
+            main_container.content = tasks_view
+            page.floating_action_button = None
+            if page.navigation_bar:
+                page.navigation_bar.visible = True
+                page.navigation_bar.selected_index = 1
+        elif target == "log":
+            main_container.content = log_view_container
+            page.floating_action_button = None
+            if page.navigation_bar: page.navigation_bar.visible = False
+        elif target == "settings":
+            main_container.content = settings_view_container
+            page.floating_action_button = None
+            if page.navigation_bar: page.navigation_bar.visible = False
+        page.update()
+
+    def process_queue():
+        while True:
+            try:
+                msg = ui_queue.get(timeout=0.1)
                 msg_type = msg.get("type")
-
+                t_id = msg.get("task_id")
+                
                 if msg_type == "log":
-                    self.log_area.insert("end", msg["text"])
-                    self.log_area.see("end")
-                    self._last_log_text += msg["text"]
-                    # Jaga buffer log (maks 100KB)
-                    if len(self._last_log_text) > 100_000:
-                        self._last_log_text = self._last_log_text[-80_000:]
-
-                elif msg_type == "progress":
-                    if "value" in msg:
-                        self.progress_bar.set(msg["value"])
-                    if "text" in msg:
-                        self.progress_label.configure(text=msg["text"])
-                    # Update statistik unduhan
+                    log_text.value = (log_text.value or "") + msg.get("text", "")
+                    if len(log_text.value) > 60000:
+                        log_text.value = log_text.value[-40000:]
+                    page.update()
+                
+                elif msg_type == "progress" and t_id in app_state["tasks"]:
+                    c = app_state["tasks"][t_id]
+                    c["progress_bar"].value = msg.get("value", 0)
+                    c["progress_text"].value = msg.get("text", "")
+                    
                     speed = msg.get("speed", "")
                     eta = msg.get("eta", "")
-                    size_dl = msg.get("size_dl", "")
-                    size_total = msg.get("size_total", "")
-                    if speed or eta or size_dl:
-                        parts = []
-                        if speed:
-                            parts.append(f"🚀 {speed}")
-                        if eta:
-                            parts.append(f"⏱️ ETA {eta}")
-                        if size_dl and size_total:
-                            parts.append(f"📦 {size_dl} / {size_total}")
-                        elif size_dl:
-                            parts.append(f"📦 {size_dl}")
-                        self.stats_label.configure(text="   ".join(parts))
-
-                elif msg_type == "info_title":
-                    self.title_label.configure(text=msg["title"])
-
-                elif msg_type == "info_thumb":
-                    self._set_thumb_label(None, text=msg.get("text", "Thumbnail tidak ditemukan."))
-
-                elif msg_type == "info_thumb_data":
-                    try:
-                        image = Image.open(BytesIO(msg["image_data"]))
-                        ctk_image = ctk.CTkImage(light_image=image, dark_image=image, size=(348, 196))
-                        self._set_thumb_label(ctk_image, text="")
-                    except Exception:
-                        self._set_thumb_label(None, text="Gagal memuat preview thumbnail.")
-
-                elif msg_type == "info_data":
-                    self._on_info_data(msg["data"])
-
-                elif msg_type == "download_finish":
-                    self.download_button.configure(
-                        text="MULAI UNDUH", fg_color="#10B981", hover_color="#059669",
-                        command=self.on_download, state="normal"
-                    )
-                    self.url_entry.configure(state="normal")
-                    self.progress_bar.set(1.0)
-                    self.progress_label.configure(text="Status: Unduhan Selesai ✨")
-                    self.stats_label.configure(text="")
-                    # Sinyal ke thread antrean bahwa download sudah selesai
-                    self._queue_done_event.set()
-                    if not self._queue_running:
-                        self.show_toast("Unduhan selesai! ✨", "success")
-                    # Pindah ke tab Log
-                    self.right_tabview.set(TAB_LOG)
-
-                elif msg_type == "download_error":
-                    self._queue_done_event.set()  # Lanjutkan ke item berikutnya meski error
-                    self.show_toast("Unduhan gagal. Periksa tab 📜 Log untuk detail error.", "error")
-
-                elif msg_type == "update_finish":
-                    self.update_button.configure(state="normal")
-                    self.progress_bar.set(1.0)
-                    self.progress_label.configure(text="Status: Update Selesai ✨")
-                    self.show_toast("yt-dlp berhasil diperbarui!", "success")
-
-        except queue.Empty:
-            pass
-        self.after(100, self.process_ui_queue)
-
-    # =========================================================================
-    # Setup UI
-    # =========================================================================
-    def setup_ui(self):
-        self.configure(fg_color="#0A0B10")
-
-        main = ctk.CTkFrame(self, fg_color="transparent")
-        main.pack(fill="both", expand=True, padx=18, pady=18)
-
-        # ─────────────────────────────────────────────────────────────────────
-        # 1. HEADER CARD
-        # ─────────────────────────────────────────────────────────────────────
-        header_card = ctk.CTkFrame(main, fg_color="#13141F", corner_radius=16)
-        header_card.pack(fill="x", pady=(0, 14))
-
-        hi = ctk.CTkFrame(header_card, fg_color="transparent")
-        hi.pack(fill="x", padx=18, pady=14)
-
-        # ── Brand Row ──────────────────────────────────────────────────────
-        brand_row = ctk.CTkFrame(hi, fg_color="transparent")
-        brand_row.pack(fill="x", pady=(0, 10))
-
-        ctk.CTkLabel(
-            brand_row, text="Maven Downloader",
-            font=ctk.CTkFont(family="Inter", size=19, weight="bold"),
-            text_color="#F3F4F6"
-        ).pack(side="left")
-
-        ver_badge = ctk.CTkFrame(brand_row, fg_color="#1E1B4B", corner_radius=6)
-        ver_badge.pack(side="left", padx=10)
-        ctk.CTkLabel(
-            ver_badge, text="v1.7", font=ctk.CTkFont(size=11, weight="bold"),
-            text_color="#818CF8"
-        ).pack(padx=8, pady=2)
-
-        # Settings button — far right
-        ctk.CTkButton(
-            brand_row, text="⚙️  Pengaturan",
-            command=self.open_settings,
-            width=110, height=28, corner_radius=7,
-            fg_color="#26293B", hover_color="#31354C",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color="#D1D5DB"
-        ).pack(side="right")
-
-        # ── URL Row ───────────────────────────────────────────────────────
-        url_row = ctk.CTkFrame(hi, fg_color="transparent")
-        url_row.pack(fill="x", pady=(0, 8))
-
-        # Platform badge (hidden initially)
-        self.platform_badge = ctk.CTkFrame(url_row, fg_color="#26293B", corner_radius=8, width=0)
-        self.platform_badge.pack(side="left")
-        self.platform_badge.pack_forget()  # start hidden
-        self._platform_label = ctk.CTkLabel(
-            self.platform_badge, text="",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color="#F3F4F6"
-        )
-        self._platform_label.pack(padx=8, pady=5)
-
-        self.url_entry = ctk.CTkEntry(
-            url_row,
-            placeholder_text="Tempelkan link YouTube, TikTok, Instagram, atau URL lainnya...",
-            height=44, corner_radius=10,
-            border_color="#2D3142", fg_color="#0E0F17",
-            text_color="#F3F4F6", placeholder_text_color="#6B7280",
-            font=ctk.CTkFont(size=13)
-        )
-        self.url_entry.pack(side="left", fill="x", expand=True, padx=(6, 8))
-        self.url_entry.bind("<KeyRelease>", self._on_url_keyrelease)
-        self.url_entry.bind("<FocusIn>", self._on_url_focus)
-
-        # Paste button
-        ctk.CTkButton(
-            url_row, text="📋", width=44, height=44,
-            corner_radius=10, fg_color="#26293B", hover_color="#31354C",
-            font=ctk.CTkFont(size=16),
-            command=self._auto_paste
-        ).pack(side="left", padx=(0, 6))
-
-        ctk.CTkButton(
-            url_row, text="Cek Info",
-            command=self.on_get_info,
-            width=110, height=44, corner_radius=10,
-            font=ctk.CTkFont(weight="bold", size=13),
-            fg_color="#4F46E5", hover_color="#4338CA"
-        ).pack(side="left", padx=(0, 8))
-
-        self.download_button = ctk.CTkButton(
-            url_row, text="MULAI UNDUH",
-            command=self.on_download,
-            width=150, height=44, corner_radius=10,
-            font=ctk.CTkFont(weight="bold", size=13),
-            fg_color="#10B981", hover_color="#059669"
-        )
-        self.download_button.pack(side="left")
-
-        # ── Tools Row ─────────────────────────────────────────────────────
-        tools_row = ctk.CTkFrame(hi, fg_color="transparent")
-        tools_row.pack(fill="x", pady=(0, 8))
-
-        ctk.CTkLabel(
-            tools_row, text="Lokasi Simpan:",
-            font=ctk.CTkFont(size=12), text_color="#9CA3AF"
-        ).pack(side="left", padx=(0, 6))
-
-        ctk.CTkLabel(
-            tools_row, textvariable=self.custom_output_path_var,
-            text_color="#38BDF8", font=ctk.CTkFont(size=12, weight="bold")
-        ).pack(side="left", padx=(0, 12))
-
-        for (label, cmd, w) in [
-            ("Ubah Folder", self.select_folder, 90),
-            ("Buka Folder", self.open_folder, 90),
-        ]:
-            ctk.CTkButton(
-                tools_row, text=label, command=cmd,
-                width=w, height=28, corner_radius=6, font=ctk.CTkFont(size=11),
-                fg_color="#26293B", hover_color="#31354C", text_color="#E5E7EB"
-            ).pack(side="left", padx=3)
-
-        self.update_button = ctk.CTkButton(
-            tools_row, text="Update yt-dlp", command=self.on_update,
-            width=105, height=28, corner_radius=6,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color="#D97706", hover_color="#B45309", text_color="#FFFFFF"
-        )
-        self.update_button.pack(side="left", padx=3)
-
-        # ── Quick Preset Row ───────────────────────────────────────────────
-        preset_row = ctk.CTkFrame(hi, fg_color="transparent")
-        preset_row.pack(fill="x")
-
-        ctk.CTkLabel(
-            preset_row, text="⚡ Preset Cepat:",
-            font=ctk.CTkFont(size=11), text_color="#6B7280"
-        ).pack(side="left", padx=(0, 8))
-
-        preset_colors = {
-            "🎬 Super Quality": ("#4F46E5", "#4338CA"),
-            "🎵 Musik MP3":     ("#7C3AED", "#6D28D9"),
-            "📱 Hemat Data":    ("#0891B2", "#0E7490"),
-            "🎙️ Podcast":       ("#059669", "#047857"),
-        }
-        for name in QUICK_PRESETS:
-            fc, hc = preset_colors.get(name, ("#26293B", "#31354C"))
-            ctk.CTkButton(
-                preset_row, text=name,
-                command=lambda n=name: self.apply_preset(n),
-                height=26, corner_radius=6, font=ctk.CTkFont(size=11),
-                fg_color=fc, hover_color=hc, text_color="#F3F4F6"
-            ).pack(side="left", padx=3)
-
-        # ─────────────────────────────────────────────────────────────────────
-        # 2. CONTENT SPLIT
-        # ─────────────────────────────────────────────────────────────────────
-        content_split = ctk.CTkFrame(main, fg_color="transparent")
-        content_split.pack(fill="both", expand=True)
-
-        # ══ LEFT CARD: MEDIA PREVIEW ══════════════════════════════════════
-        preview_card = ctk.CTkFrame(content_split, width=390, fg_color="#13141F", corner_radius=16)
-        preview_card.pack(side="left", fill="y", padx=(0, 14))
-        preview_card.pack_propagate(False)
-
-        pi = ctk.CTkFrame(preview_card, fg_color="transparent")
-        pi.pack(fill="both", expand=True, padx=16, pady=16)
-
-        ctk.CTkLabel(
-            pi, text="Informasi Media",
-            font=ctk.CTkFont(size=14, weight="bold"), text_color="#F3F4F6"
-        ).pack(anchor="w", pady=(0, 10))
-
-        # Thumbnail
-        self.thumb_label = ctk.CTkLabel(
-            pi, text="Pratinjau Thumbnail",
-            width=358, height=200,
-            fg_color="#0E0F17", corner_radius=10, text_color="#6B7280"
-        )
-        self.thumb_label.pack(fill="x", pady=(0, 10))
-
-        # Video Title
-        self.title_label = ctk.CTkLabel(
-            pi,
-            text="Judul video akan muncul di sini setelah menekan tombol Cek Info.",
-            wraplength=354, justify="left",
-            font=ctk.CTkFont(size=12), text_color="#E5E7EB"
-        )
-        self.title_label.pack(fill="x", anchor="w", pady=(0, 8))
-
-        # ── Dynamic Info Container ────────────────────────────────────────
-        # Single container wrapping meta + badges.
-        # Packed ONCE on first _on_info_data(); never pack_forgot again.
-        self._info_container = ctk.CTkFrame(pi, fg_color="transparent")
-        # (NOT packed yet — packed on first successful Cek Info)
-
-        # ── Metadata card ─────────────────────────────────────────────────
-        self.meta_frame = ctk.CTkFrame(self._info_container, fg_color="#0E0F17", corner_radius=10)
-        self.meta_frame.pack(fill="x", pady=(0, 6))
-
-        # Header row: platform chip (left) + upload date (right)
-        meta_top = ctk.CTkFrame(self.meta_frame, fg_color="transparent")
-        meta_top.pack(fill="x", padx=10, pady=(8, 4))
-        self.meta_platform = ctk.CTkLabel(
-            meta_top, text="", font=ctk.CTkFont(size=10, weight="bold"),
-            text_color="#818CF8", anchor="w"
-        )
-        self.meta_platform.pack(side="left")
-        self.meta_date = ctk.CTkLabel(
-            meta_top, text="", font=ctk.CTkFont(size=10),
-            text_color="#6B7280", anchor="e"
-        )
-        self.meta_date.pack(side="right")
-
-        # Thin separator
-        ctk.CTkFrame(self.meta_frame, fg_color="#1F2937", height=1).pack(fill="x", padx=10)
-
-        # 2-column grid: icon-label pairs
-        meta_grid = ctk.CTkFrame(self.meta_frame, fg_color="transparent")
-        meta_grid.pack(fill="x", padx=10, pady=(6, 4))
-        meta_grid.columnconfigure(0, weight=1)
-        meta_grid.columnconfigure(1, weight=1)
-
-        self.meta_channel = ctk.CTkLabel(
-            meta_grid, text="", font=ctk.CTkFont(size=11), text_color="#D1D5DB", anchor="w"
-        )
-        self.meta_channel.grid(row=0, column=0, sticky="w", pady=2)
-
-        self.meta_duration = ctk.CTkLabel(
-            meta_grid, text="", font=ctk.CTkFont(size=11), text_color="#D1D5DB", anchor="w"
-        )
-        self.meta_duration.grid(row=0, column=1, sticky="w", pady=2)
-
-        self.meta_views = ctk.CTkLabel(
-            meta_grid, text="", font=ctk.CTkFont(size=11), text_color="#D1D5DB", anchor="w"
-        )
-        self.meta_views.grid(row=1, column=0, sticky="w", pady=2)
-
-        self.meta_likes = ctk.CTkLabel(
-            meta_grid, text="", font=ctk.CTkFont(size=11), text_color="#D1D5DB", anchor="w"
-        )
-        self.meta_likes.grid(row=1, column=1, sticky="w", pady=2)
-
-        # Description preview (max 2 lines)
-        self.meta_desc = ctk.CTkLabel(
-            self.meta_frame, text="",
-            font=ctk.CTkFont(size=10), text_color="#6B7280",
-            anchor="w", justify="left", wraplength=334
-        )
-        self.meta_desc.pack(fill="x", padx=10, pady=(2, 8))
-
-        # ── Quality badges row ────────────────────────────────────────────
-        badges_header = ctk.CTkFrame(self._info_container, fg_color="transparent")
-        badges_header.pack(fill="x", pady=(0, 3))
-        ctk.CTkLabel(
-            badges_header, text="KUALITAS TERSEDIA",
-            font=ctk.CTkFont(size=9, weight="bold"), text_color="#374151"
-        ).pack(side="left")
-
-        self.badges_frame = ctk.CTkFrame(self._info_container, fg_color="transparent")
-        self.badges_frame.pack(fill="x", pady=(0, 4))
-
-
-        # ── Progress Section ─────────────────────────────────────────────
-        prog_card = ctk.CTkFrame(pi, fg_color="#0E0F17", corner_radius=10)
-        prog_card.pack(fill="x", side="bottom", pady=(8, 0))
-
-        prog_inner = ctk.CTkFrame(prog_card, fg_color="transparent")
-        prog_inner.pack(fill="x", padx=12, pady=10)
-
-        self.progress_label = ctk.CTkLabel(
-            prog_inner, text="Status: Siap",
-            font=ctk.CTkFont(size=11, weight="bold"), text_color="#9CA3AF"
-        )
-        self.progress_label.pack(anchor="w", pady=(0, 5))
-
-        self.progress_bar = ctk.CTkProgressBar(
-            prog_inner, height=8, corner_radius=4,
-            progress_color="#10B981", fg_color="#1F2937"
-        )
-        self.progress_bar.pack(fill="x")
-        self.progress_bar.set(0)
-
-        self.stats_label = ctk.CTkLabel(
-            prog_inner, text="",
-            font=ctk.CTkFont(size=10), text_color="#6B7280"
-        )
-        self.stats_label.pack(anchor="w", pady=(4, 0))
-
-        # ══ RIGHT PANEL: TABVIEW ══════════════════════════════════════════
-        right_panel = ctk.CTkFrame(content_split, fg_color="transparent")
-        right_panel.pack(side="left", fill="both", expand=True)
-
-        self.right_tabview = ctk.CTkTabview(
-            right_panel,
-            fg_color="#13141F",
-            segmented_button_fg_color="#0A0B10",
-            segmented_button_selected_color="#4F46E5",
-            segmented_button_selected_hover_color="#4338CA",
-            segmented_button_unselected_color="#0A0B10",
-            segmented_button_unselected_hover_color="#1E2030",
-            text_color="#D1D5DB",
-            corner_radius=16
-        )
-        self.right_tabview.pack(fill="both", expand=True)
-
-        tab_dl = self.right_tabview.add(TAB_UNDUH)
-        tab_queue = self.right_tabview.add(TAB_ANTEAN)
-        tab_log = self.right_tabview.add(TAB_LOG)
-
-        # ── Tab: ⚡ Unduh ─────────────────────────────────────────────────
-        self._build_download_tab(tab_dl)
-
-        # ── Tab: 📋 Antrean ───────────────────────────────────────────────
-        self._build_queue_tab(tab_queue)
-
-        # ── Tab: 📜 Log ───────────────────────────────────────────────────
-        self._build_log_tab(tab_log)
-
-        # Init toggle
-        self.toggle_opts()
-
-    # =========================================================================
-    # Tab Builders
-    # =========================================================================
-    def _build_download_tab(self, parent):
-        """Bangun tab ⚡ Unduh dengan semua opsi download."""
-        scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
-        scroll.pack(fill="both", expand=True)
-
-        oi = ctk.CTkFrame(scroll, fg_color="transparent")
-        oi.pack(fill="x", padx=4, pady=8)
-
-        # ── Mode Switcher ────────────────────────────────────────────────
-        mode_row = ctk.CTkFrame(oi, fg_color="transparent")
-        mode_row.pack(fill="x", pady=(0, 12))
-        ctk.CTkLabel(
-            mode_row, text="Mode Unduhan:",
-            font=ctk.CTkFont(size=11, weight="bold"), text_color="#9CA3AF"
-        ).pack(anchor="w", pady=(0, 4))
-        self.mode_segmented = ctk.CTkSegmentedButton(
-            mode_row,
-            values=["Video + Audio", "Audio Only"],
-            command=self.on_mode_segment_change,
-            selected_color="#4F46E5", selected_hover_color="#4338CA",
-            unselected_color="#10111A", unselected_hover_color="#26293B",
-            text_color="#F3F4F6", font=ctk.CTkFont(size=12, weight="bold")
-        )
-        self.mode_segmented.set("Video + Audio")
-        self.mode_segmented.pack(anchor="w")
-
-        # ── Dynamic Mode Content ─────────────────────────────────────────
-        self.mode_content_frame = ctk.CTkFrame(oi, fg_color="transparent")
-        self.mode_content_frame.pack(fill="x", pady=(0, 12))
-
-        # Audio-only opts
-        self.audio_opts = ctk.CTkFrame(self.mode_content_frame, fg_color="transparent")
-        a_fmt_box = ctk.CTkFrame(self.audio_opts, fg_color="transparent")
-        a_fmt_box.pack(side="left")
-        ctk.CTkLabel(
-            a_fmt_box, text="Format Audio:",
-            font=ctk.CTkFont(size=11, weight="bold"), text_color="#9CA3AF"
-        ).pack(anchor="w", pady=(0, 4))
-        self.audio_fmt_segmented = ctk.CTkSegmentedButton(
-            a_fmt_box, values=["MP3", "M4A", "FLAC", "WAV", "OPUS"],
-            command=self.on_audio_fmt_change,
-            selected_color="#4F46E5", selected_hover_color="#4338CA",
-            unselected_color="#10111A", unselected_hover_color="#26293B",
-            text_color="#F3F4F6", font=ctk.CTkFont(size=12, weight="bold")
-        )
-        self.audio_fmt_segmented.set("MP3")
-        self.audio_fmt_segmented.pack(anchor="w")
-
-        # Video opts
-        self.video_opts = ctk.CTkFrame(self.mode_content_frame, fg_color="transparent")
-
-        v_row1 = ctk.CTkFrame(self.video_opts, fg_color="transparent")
-        v_row1.pack(fill="x", pady=(0, 10))
-
-        def _seg_box(parent, label, values, cmd, default):
-            box = ctk.CTkFrame(parent, fg_color="transparent")
-            box.pack(side="left", padx=(0, 16))
-            ctk.CTkLabel(
-                box, text=label,
-                font=ctk.CTkFont(size=11, weight="bold"), text_color="#9CA3AF"
-            ).pack(anchor="w", pady=(0, 4))
-            seg = ctk.CTkSegmentedButton(
-                box, values=values, command=cmd,
-                selected_color="#4F46E5", selected_hover_color="#4338CA",
-                unselected_color="#10111A", unselected_hover_color="#26293B",
-                text_color="#F3F4F6", font=ctk.CTkFont(size=11, weight="bold")
-            )
-            seg.set(default)
-            seg.pack(anchor="w")
-            return seg
-
-        self.video_fmt_segmented = _seg_box(
-            v_row1, "Format Video:", ["MP4", "MKV", "WEBM", "MOV", "AVI"],
-            self.on_video_fmt_change, "MP4"
-        )
-        self.v_codec_segmented = _seg_box(
-            v_row1, "Video Codec:", ["Auto", "H.264", "VP9", "AV1"],
-            self.on_vcodec_change, "Auto"
-        )
-        self.a_codec_segmented = _seg_box(
-            v_row1, "Audio Codec:", ["Auto", "M4A", "Opus"],
-            self.on_acodec_change, "Auto"
-        )
-
-        v_row2 = ctk.CTkFrame(self.video_opts, fg_color="transparent")
-        v_row2.pack(fill="x")
-        ctk.CTkLabel(
-            v_row2, text="Kualitas Maksimal:",
-            font=ctk.CTkFont(size=11, weight="bold"), text_color="#9CA3AF"
-        ).pack(anchor="w", pady=(0, 4))
-        self.res_segmented = ctk.CTkSegmentedButton(
-            v_row2,
-            values=["Best", "4K", "1440p", "1080p", "720p", "480p", "360p"],
-            command=self.on_res_segmented_change,
-            selected_color="#4F46E5", selected_hover_color="#4338CA",
-            unselected_color="#10111A", unselected_hover_color="#26293B",
-            text_color="#F3F4F6", font=ctk.CTkFont(size=12, weight="bold")
-        )
-        self.res_segmented.set("1080p")
-        self.res_segmented.pack(fill="x")
-
-        # Divider
-        ctk.CTkFrame(oi, height=1, fg_color="#26293B").pack(fill="x", pady=(4, 12))
-
-        # ── Language selector ────────────────────────────────────────────
-        lang_box = ctk.CTkFrame(oi, fg_color="transparent")
-        lang_box.pack(fill="x", pady=(0, 10))
-
-        self.lang_label = ctk.CTkLabel(
-            lang_box, text="Bahasa Subtitle / Lirik:",
-            font=ctk.CTkFont(size=11, weight="bold"), text_color="#9CA3AF"
-        )
-        self.lang_label.pack(anchor="w", pady=(0, 4))
-
-        lang_ctrl = ctk.CTkFrame(lang_box, fg_color="transparent")
-        lang_ctrl.pack(fill="x")
-
-        self.lang_optionmenu = ctk.CTkOptionMenu(
-            lang_ctrl, values=list(LANG_PRESETS.keys()),
-            command=self.on_lang_preset_change,
-            fg_color="#10111A", button_color="#26293B",
-            button_hover_color="#31354C", text_color="#F3F4F6",
-            dropdown_fg_color="#13141F", dropdown_hover_color="#26293B",
-            font=ctk.CTkFont(size=12), height=32, width=260
-        )
-        self.lang_optionmenu.set("🇮🇩 Indonesia & 🇬🇧 English")
-        self.lang_optionmenu.pack(side="left", padx=(0, 10))
-
-        ctk.CTkLabel(
-            lang_ctrl, text="Kode ISO:", font=ctk.CTkFont(size=11), text_color="#6B7280"
-        ).pack(side="left", padx=(0, 4))
-        self.lang_entry = ctk.CTkEntry(
-            lang_ctrl, textvariable=self.subs_lang_var,
-            width=100, height=32, corner_radius=6,
-            border_color="#2D3142", fg_color="#10111A",
-            text_color="#38BDF8", font=ctk.CTkFont(size=12, weight="bold")
-        )
-        self.lang_entry.pack(side="left")
-
-        # Divider
-        ctk.CTkFrame(oi, height=1, fg_color="#26293B").pack(fill="x", pady=(6, 12))
-
-        # ── Checkboxes ───────────────────────────────────────────────────
-        extras = ctk.CTkFrame(oi, fg_color="transparent")
-        extras.pack(fill="x")
-
-        cb_style = dict(font=ctk.CTkFont(size=12), fg_color="#4F46E5", hover_color="#4338CA")
-        self.embed_thumb_cb = ctk.CTkCheckBox(
-            extras, text="Embed Thumb", variable=self.embed_thumb_var, **cb_style
-        )
-        self.embed_thumb_cb.grid(row=0, column=0, padx=(0, 14), pady=3, sticky="w")
-
-        self.embed_subs_cb = ctk.CTkCheckBox(
-            extras, text="Embed Sub (Otomatis Aktif)", variable=self.embed_subs_var, **cb_style
-        )
-        self.embed_subs_cb.grid(row=0, column=1, padx=(0, 14), pady=3, sticky="w")
-
-        self.download_subs_cb = ctk.CTkCheckBox(
-            extras, text="Download Sub Terpisah", variable=self.download_subs_var, **cb_style
-        )
-        self.download_subs_cb.grid(row=0, column=2, padx=(0, 14), pady=3, sticky="w")
-
-        self.use_aria2_cb = ctk.CTkCheckBox(
-            extras, text="Aria2c Downloader", variable=self.use_aria2_var, **cb_style
-        )
-        self.use_aria2_cb.grid(row=0, column=3, padx=(0, 14), pady=3, sticky="w")
-
-        self.download_playlist_cb = ctk.CTkCheckBox(
-            extras, text="Full Playlist", variable=self.download_playlist_var, **cb_style
-        )
-        self.download_playlist_cb.grid(row=0, column=4, pady=3, sticky="w")
-
-        # ── Custom Command ───────────────────────────────────────────────
-        ctk.CTkFrame(oi, height=1, fg_color="#26293B").pack(fill="x", pady=(12, 8))
-
-        ctk.CTkLabel(
-            oi, text="Perintah Custom (Opsional):",
-            font=ctk.CTkFont(size=11, weight="bold"), text_color="#6B7280"
-        ).pack(anchor="w", pady=(0, 4))
-        ctk.CTkEntry(
-            oi, textvariable=self.custom_cmd_var,
-            placeholder_text="Contoh: --sponsorblock-remove sponsor",
-            height=32, corner_radius=8,
-            border_color="#2D3142", fg_color="#0E0F17",
-            text_color="#D1D5DB", placeholder_text_color="#4B5563",
-            font=ctk.CTkFont(size=11)
-        ).pack(fill="x")
-
-    def _build_queue_tab(self, parent):
-        """Bangun tab 📋 Antrean — batch download queue sederhana."""
-        qi = ctk.CTkFrame(parent, fg_color="transparent")
-        qi.pack(fill="both", expand=True, padx=4, pady=8)
-
-        hdr = ctk.CTkFrame(qi, fg_color="transparent")
-        hdr.pack(fill="x", pady=(0, 8))
-        ctk.CTkLabel(
-            hdr, text="Antrean Unduhan (Batch)",
-            font=ctk.CTkFont(size=13, weight="bold"), text_color="#F3F4F6"
-        ).pack(side="left")
-        ctk.CTkButton(
-            hdr, text="🗑️ Kosongkan",
-            command=self._clear_queue_input,
-            width=90, height=26, corner_radius=6, font=ctk.CTkFont(size=10),
-            fg_color="#26293B", hover_color="#31354C", text_color="#9CA3AF"
-        ).pack(side="right")
-
-        ctk.CTkLabel(
-            qi,
-            text="Masukkan satu URL per baris. Gunakan tombol ➕ Tambahkan ke Antrean lalu tekan Mulai Semua.",
-            font=ctk.CTkFont(size=11), text_color="#6B7280", wraplength=700, justify="left"
-        ).pack(anchor="w", pady=(0, 6))
-
-        self.queue_textbox = ctk.CTkTextbox(
-            qi, height=140, font=ctk.CTkFont(family="Consolas", size=11),
-            fg_color="#0E0F17", text_color="#D1D5DB",
-            border_color="#26293B", border_width=1, corner_radius=8
-        )
-        self.queue_textbox.pack(fill="x", pady=(0, 8))
-
-        btn_row = ctk.CTkFrame(qi, fg_color="transparent")
-        btn_row.pack(fill="x", pady=(0, 10))
-        ctk.CTkButton(
-            btn_row, text="➕  Tambahkan ke Antrean",
-            command=self._add_to_queue,
-            height=34, corner_radius=8,
-            fg_color="#4F46E5", hover_color="#4338CA",
-            font=ctk.CTkFont(size=12, weight="bold")
-        ).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(
-            btn_row, text="▶  Mulai Semua",
-            command=self._start_queue,
-            height=34, corner_radius=8,
-            fg_color="#10B981", hover_color="#059669",
-            font=ctk.CTkFont(size=12, weight="bold")
-        ).pack(side="left")
-        ctk.CTkButton(
-            btn_row, text="📂  Import dari .txt",
-            command=self._import_queue_txt,
-            height=34, corner_radius=8,
-            fg_color="#26293B", hover_color="#31354C",
-            font=ctk.CTkFont(size=12)
-        ).pack(side="right")
-
-        # Queue list display
-        self.queue_list_frame = ctk.CTkScrollableFrame(
-            qi, fg_color="#0E0F17", corner_radius=8
-        )
-        self.queue_list_frame.pack(fill="both", expand=True)
-
-        self._queue_items = []  # List of (url, status_label)
-
-    def _build_log_tab(self, parent):
-        """Bangun tab 📜 Log — terminal output yt-dlp."""
-        li = ctk.CTkFrame(parent, fg_color="transparent")
-        li.pack(fill="both", expand=True, padx=4, pady=8)
-
-        log_hdr = ctk.CTkFrame(li, fg_color="transparent")
-        log_hdr.pack(fill="x", pady=(0, 8))
-        ctk.CTkLabel(
-            log_hdr, text="Log Eksekusi / Terminal",
-            font=ctk.CTkFont(size=13, weight="bold"), text_color="#F3F4F6"
-        ).pack(side="left")
-        ctk.CTkButton(
-            log_hdr, text="Bersihkan Log", command=self.clear_log,
-            width=90, height=26, corner_radius=6, font=ctk.CTkFont(size=10),
-            fg_color="#26293B", hover_color="#31354C", text_color="#9CA3AF"
-        ).pack(side="right")
-
-        self.log_area = ctk.CTkTextbox(
-            li,
-            font=ctk.CTkFont(family="Consolas", size=11),
-            fg_color="#080910", text_color="#D1D5DB",
-            border_color="#1F2937", border_width=1, corner_radius=8
-        )
-        self.log_area.pack(fill="both", expand=True)
-
-    # =========================================================================
-    # Info Data Handler (after Cek Info)
-    # =========================================================================
-    def _on_info_data(self, info: dict):
-        self.last_video_info = info
-
-        # ── Platform chip ────────────────────────────────────────────────
-        webpage_url = info.get('webpage_url', '') or info.get('url', '')
-        platform_text = ""
-        for (pattern, label, _color) in PLATFORM_PATTERNS:
-            if re.search(pattern, webpage_url, re.IGNORECASE):
-                platform_text = label
-                break
-        self.meta_platform.configure(text=platform_text)
-
-        # ── Upload date ─────────────────────────────────────────────────
-        raw_date = info.get('upload_date', '')  # format: YYYYMMDD
-        if raw_date and len(raw_date) == 8:
-            date_str = f"{raw_date[6:8]}/{raw_date[4:6]}/{raw_date[:4]}"
-        else:
-            date_str = ""
-        self.meta_date.configure(text=date_str)
-
-        # ── Channel ─────────────────────────────────────────────────────
-        channel = info.get('uploader') or info.get('channel') or info.get('uploader_id', '')
-        self.meta_channel.configure(text=f"👤 {channel}" if channel else "")
-
-        # ── Duration ────────────────────────────────────────────────────
-        dur_str = info.get('duration_string', '')
-        if not dur_str:
-            dur_sec = info.get('duration', 0)
-            if dur_sec:
-                m, s = divmod(int(dur_sec), 60)
-                h, m = divmod(m, 60)
-                dur_str = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
-        self.meta_duration.configure(text=f"⏱️ {dur_str}" if dur_str else "")
-
-        # ── Views ────────────────────────────────────────────────────────
-        vc = info.get('view_count', 0)
-        if vc:
-            vc_str = f"{vc:,}".replace(",", ".")
-            self.meta_views.configure(text=f"👁️ {vc_str}")
-        else:
-            self.meta_views.configure(text="")
-
-        # ── Likes ────────────────────────────────────────────────────────
-        lc = info.get('like_count', 0)
-        if lc:
-            if lc >= 1_000_000:
-                lc_str = f"{lc/1_000_000:.1f}Jt"
-            elif lc >= 1_000:
-                lc_str = f"{lc/1_000:.1f}Rb"
-            else:
-                lc_str = str(lc)
-            self.meta_likes.configure(text=f"👍 {lc_str}")
-        else:
-            self.meta_likes.configure(text="")
-
-        # ── Description preview (first 100 chars, single line trimmed) ──
-        desc_raw = info.get('description', '') or ''
-        if desc_raw:
-            # Take first 2 non-empty lines, join them
-            lines = [l.strip() for l in desc_raw.splitlines() if l.strip()]
-            preview = " · ".join(lines[:2])
-            if len(preview) > 110:
-                preview = preview[:107] + "..."
-            self.meta_desc.configure(text=preview)
-        else:
-            self.meta_desc.configure(text="")
-
-        # ── Rebuild quality badges ────────────────────────────────────────
-        for widget in self.badges_frame.winfo_children():
-            widget.destroy()
-
-        formats = info.get('formats', [])
-        heights = set(f.get('height', 0) for f in formats if f.get('height'))
-        fps_vals = [f.get('fps', 0) for f in formats if f.get('fps')]
-        has_hdr = any(
-            str(f.get('dynamic_range', '')).upper() in ('HDR', 'HDR10', 'HDR10+', 'DOVI', 'HLG')
-            for f in formats
-        )
-        # Audio codecs available
-        audio_codecs = set(
-            (f.get('acodec') or '').split('.')[0].lower()
-            for f in formats if f.get('acodec') and f.get('acodec') != 'none'
-        )
-
-        badges = []
-        max_h = max(heights, default=0)
-        if max_h >= 2160: badges.append(("4K", "#F59E0B", "🌟"))
-        elif max_h >= 1440: badges.append(("2K", "#10B981", "✨"))
-        if max_h >= 1080: badges.append(("1080p", "#3B82F6", "📺"))
-        elif max_h >= 720: badges.append(("720p", "#6366F1", "📺"))
-        elif max_h >= 480: badges.append(("480p", "#8B5CF6", "📺"))
-        if any(f >= 59 for f in fps_vals): badges.append(("60FPS", "#EC4899", "⚡"))
-        if has_hdr: badges.append(("HDR", "#F97316", "🌈"))
-        if 'opus' in audio_codecs: badges.append(("Opus", "#14B8A6", "🎵"))
-        elif 'mp4a' in audio_codecs or 'aac' in audio_codecs: badges.append(("AAC", "#06B6D4", "🎵"))
-        if not heights and formats: badges.append(("Audio", "#A78BFA", "🎧"))
-
-        for (badge_text, fg, icon) in badges:
-            b = ctk.CTkFrame(self.badges_frame, fg_color=fg, corner_radius=6)
-            b.pack(side="left", padx=(0, 4), pady=2)
-            ctk.CTkLabel(
-                b, text=f"{icon} {badge_text}", font=ctk.CTkFont(size=9, weight="bold"),
-                text_color="white"
-            ).pack(padx=6, pady=3)
-
-        # ── Show info container (only packed once, stays in place after) ──
-        if not self._info_container_shown:
-            self._info_container.pack(fill="x", pady=(0, 4))
-            self._info_container_shown = True
-
-
-    # =========================================================================
-    # Batch Queue Tab Actions
-    # =========================================================================
-    def _add_to_queue(self):
-        raw = self.queue_textbox.get("1.0", "end").strip()
-        urls = [line.strip() for line in raw.splitlines() if line.strip()]
-        if not urls:
-            self.show_toast("Tidak ada URL yang valid.", "warning")
-            return
-        for url in urls:
-            self._add_queue_item(url)
-        self.queue_textbox.delete("1.0", "end")
-        self.show_toast(f"✅ {len(urls)} URL ditambahkan ke antrean.", "success")
-
-    def _add_queue_item(self, url: str):
-        item_frame = ctk.CTkFrame(self.queue_list_frame, fg_color="#13141F", corner_radius=8)
-        item_frame.pack(fill="x", pady=3)
-        inner = ctk.CTkFrame(item_frame, fg_color="transparent")
-        inner.pack(fill="x", padx=10, pady=6)
-        url_lbl = ctk.CTkLabel(
-            inner, text=url[:80] + ("..." if len(url) > 80 else ""),
-            font=ctk.CTkFont(size=11), text_color="#9CA3AF", anchor="w"
-        )
-        url_lbl.pack(side="left", fill="x", expand=True)
-        status_var = ctk.StringVar(value="⏳ Menunggu")
-        status_lbl = ctk.CTkLabel(
-            inner, textvariable=status_var, font=ctk.CTkFont(size=11),
-            text_color="#6B7280", width=100
-        )
-        status_lbl.pack(side="right")
-        self._queue_items.append((url, status_var))
-
-    def _start_queue(self):
-        if not self._queue_items:
-            self.show_toast("Antrean kosong.", "warning")
-            return
-        if self._queue_running:
-            self.show_toast("Antrean sedang berjalan.", "warning")
-            return
-
-        total = len(self._queue_items)
-        self.show_toast(f"▶️ Memulai {total} unduhan dalam antrean...", "info")
-
-        def _run_queue():
-            self._queue_running = True
-            completed = 0
-            failed = 0
-
-            for (url, status_var) in list(self._queue_items):
-                # Update status UI di main thread
-                self.after(0, lambda sv=status_var: sv.set("🔄 Mengunduh"))
-                self.after(0, lambda: self.progress_label.configure(
-                    text=f"Antrean: {completed+1}/{total}"
-                ))
-
-                # Reset event sebelum mulai download
-                self._queue_done_event.clear()
-
-                # Jalankan download langsung (sama persis seperti tombol unduh biasa)
-                download_video_logic(
-                    url,
-                    self.mode_var.get(),
-                    self.audio_only_format_var.get(),
-                    self.resolution_var.get(),
-                    self.video_codec_var.get(),
-                    self.audio_codec_var.get(),
-                    self.container_var.get(),
-                    self.download_subs_var.get(),
-                    self.embed_subs_var.get(),
-                    self.subs_lang_var.get().strip(),
-                    self.embed_thumb_var.get(),
-                    self.use_aria2_var.get(),
-                    self.download_playlist_var.get(),
-                    self.custom_output_path_var.get(),
-                    self.custom_cmd_var.get().strip()
-                )
-
-                # Tunggu sinyal selesai dari process_ui_queue (maks 60 menit)
-                self._queue_done_event.wait(timeout=3600)
-
-                # Tentukan status akhir item
-                # (download_video_logic sudah kirim download_finish ke ui_queue)
-                completed += 1
-                self.after(0, lambda sv=status_var: sv.set("✅ Selesai"))
-
-            self._queue_running = False
-            self.after(0, lambda: self.show_toast(
-                f"✅ Antrean selesai! {completed} video berhasil diunduh.", "success"
-            ))
-            self.after(0, lambda: self.progress_label.configure(text="Status: Semua Antrean Selesai ✨"))
-
-        threading.Thread(target=_run_queue, daemon=True).start()
-
-    def _clear_queue_input(self):
-        self.queue_textbox.delete("1.0", "end")
-        for widget in self.queue_list_frame.winfo_children():
-            widget.destroy()
-        self._queue_items.clear()
-
-    def _import_queue_txt(self):
-        path = filedialog.askopenfilename(
-            title="Pilih file .txt berisi daftar URL",
-            filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")]
-        )
-        if not path:
-            return
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            self.queue_textbox.delete("1.0", "end")
-            self.queue_textbox.insert("1.0", content)
-            self.show_toast(f"✅ File berhasil dimuat.", "success")
-        except Exception as e:
-            self.show_toast(f"Gagal membaca file: {e}", "error")
-
-    # =========================================================================
-    # Platform Detection & URL Interactions
-    # =========================================================================
-    def _on_url_keyrelease(self, event=None):
-        url = self.url_entry.get().strip()
-        self._update_platform_badge(url)
-
-    def _on_url_focus(self, event=None):
-        """Deteksi URL dari clipboard saat entry difokuskan."""
-        try:
-            clipboard = self.clipboard_get()
-            if clipboard and (
-                clipboard.startswith("http://") or clipboard.startswith("https://")
-            ):
-                current = self.url_entry.get().strip()
-                if not current:
-                    self.url_entry.insert(0, clipboard)
-                    self._update_platform_badge(clipboard)
-        except Exception:
-            pass
-
-    def _auto_paste(self):
-        try:
-            clipboard = self.clipboard_get()
-            if clipboard:
-                self.url_entry.delete(0, "end")
-                self.url_entry.insert(0, clipboard)
-                self._update_platform_badge(clipboard)
-        except Exception:
-            pass
-
-    def _update_platform_badge(self, url: str):
-        if not url:
-            self.platform_badge.pack_forget()
-            return
-        for pattern, name, color in PLATFORM_PATTERNS:
-            if re.search(pattern, url, re.I):
-                self._platform_label.configure(text=name, text_color=color)
-                self.platform_badge.pack(side="left", padx=(0, 6))
-                return
-        # Generic URL
-        if url.startswith("http"):
-            self._platform_label.configure(text="🌐 Web", text_color="#6B7280")
-            self.platform_badge.pack(side="left", padx=(0, 6))
-        else:
-            self.platform_badge.pack_forget()
-
-    # =========================================================================
-    # Quick Presets
-    # =========================================================================
-    def apply_preset(self, preset_name: str):
-        p = QUICK_PRESETS.get(preset_name)
-        if not p:
-            return
-        mode = p["mode"]
-        self.mode_var.set(mode)
-        self.mode_segmented.set("Audio Only" if mode == "audio_only" else "Video + Audio")
-        self.container_var.set(p["container"])
-        self.resolution_var.set(p["resolution"])
-        self.video_codec_var.set(p["video_codec"])
-        self.audio_codec_var.set(p["audio_codec"])
-        self.audio_only_format_var.set(p["audio_format"])
-        self.embed_thumb_var.set(p["embed_thumb"])
-        # Update segmented buttons
-        self.video_fmt_segmented.set(p["label_v"])
-        self.v_codec_segmented.set(p["label_c"])
-        self.a_codec_segmented.set(p["label_a"])
-        self.res_segmented.set(p["label_r"])
-        af_map = {"mp3": "MP3", "m4a": "M4A", "flac": "FLAC", "wav": "WAV", "opus": "OPUS"}
-        self.audio_fmt_segmented.set(af_map.get(p["audio_format"], "MP3"))
-        self.toggle_opts()
-        self.show_toast(f"Preset '{preset_name}' diterapkan.", "info")
-
-    # =========================================================================
-    # Toast Notification
-    # =========================================================================
-    def show_toast(self, message: str, toast_type: str = "info"):
-        icons = {"success": "✅", "error": "❌", "info": "ℹ️", "warning": "⚠️"}
-        colors = {
-            "success": "#10B981",
-            "error":   "#EF4444",
-            "info":    "#3B82F6",
-            "warning": "#F59E0B",
-        }
-        icon = icons.get(toast_type, "ℹ️")
-        bg = colors.get(toast_type, "#3B82F6")
-
-        try:
-            toast = ctk.CTkToplevel(self)
-            toast.overrideredirect(True)
-            toast.attributes("-topmost", True)
-            toast.configure(fg_color=bg)
-
-            w, h = 360, 56
-            self.update_idletasks()
-            x = self.winfo_x() + self.winfo_width() - w - 24
-            y = self.winfo_y() + self.winfo_height() - h - 60
-            toast.geometry(f"{w}x{h}+{x}+{y}")
-
-            ctk.CTkLabel(
-                toast,
-                text=f"{icon}  {message}",
-                text_color="white",
-                font=ctk.CTkFont(size=12, weight="bold"),
-                wraplength=330, anchor="w", justify="left"
-            ).pack(fill="both", expand=True, padx=14, pady=8)
-
-            toast.after(3200, lambda: toast.destroy() if toast.winfo_exists() else None)
-        except Exception:
-            pass
-
-    # =========================================================================
-    # Settings Window
-    # =========================================================================
-
-    # =========================================================================
-    # Segmented Button Handlers
-    # =========================================================================
-    def on_mode_segment_change(self, value):
-        self.mode_var.set("audio_only" if value == "Audio Only" else "video_audio")
-        self.toggle_opts()
-
-    def on_video_fmt_change(self, value):
-        self.container_var.set(value.lower())
-
-    def on_audio_fmt_change(self, value):
-        self.audio_only_format_var.set(value.lower())
-
-    def on_vcodec_change(self, value):
-        self.video_codec_var.set({"Auto": "best", "H.264": "h264", "VP9": "vp9", "AV1": "av1"}.get(value, "best"))
-
-    def on_acodec_change(self, value):
-        self.audio_codec_var.set({"Auto": "best", "M4A": "m4a", "Opus": "opus"}.get(value, "best"))
-
-    def on_res_segmented_change(self, value):
-        self.resolution_var.set(
-            {"Best": "best", "4K": "2160", "1440p": "1440",
-             "1080p": "1080", "720p": "720", "480p": "480", "360p": "360"}.get(value, "1080")
-        )
-
-    def on_lang_preset_change(self, value):
-        code = LANG_PRESETS.get(value, "id,en")
-        if code != "custom":
-            self.subs_lang_var.set(code)
-        else:
-            self.lang_entry.focus()
-
-    def toggle_opts(self):
-        if not (hasattr(self, 'video_opts') and hasattr(self, 'audio_opts')):
-            return
-        if self.mode_var.get() == "audio_only":
-            self.video_opts.pack_forget()
-            self.audio_opts.pack(fill="x")
-            if hasattr(self, 'download_subs_cb'):
-                self.download_subs_cb.configure(text="Download Lirik Terpisah")
-                self.embed_subs_cb.configure(text="Embed Lirik")
-                self.lang_label.configure(text="Bahasa Lirik Lagu:")
-        else:
-            self.audio_opts.pack_forget()
-            self.video_opts.pack(fill="x")
-            if hasattr(self, 'download_subs_cb'):
-                self.download_subs_cb.configure(text="Download Sub Terpisah")
-                self.embed_subs_cb.configure(text="Embed Sub (Otomatis Aktif)")
-                self.lang_label.configure(text="Bahasa Subtitle Video:")
-
-    # =========================================================================
-    # Core Actions
-    # =========================================================================
-    def clear_log(self):
-        self.log_area.delete("1.0", "end")
-        self._last_log_text = ""
-
-    def select_folder(self):
-        path = filedialog.askdirectory(title="Pilih Folder Output")
-        if path:
-            self.custom_output_path_var.set(path)
-            save_config(path=path)
-
-    def open_folder(self):
-        path = self.custom_output_path_var.get() or DEFAULT_OUTPUT_DIR
-        if os.path.exists(path):
-            if sys.platform == "win32":
-                os.startfile(path)
-            else:
-                subprocess.Popen(["xdg-open", path])
-
-    def open_settings(self):
-        if self._settings_window and self._settings_window.winfo_exists():
-            self._settings_window.focus()
-            return
-        self._settings_window = SettingsWindow(
-            self,
-            current_path=self.custom_output_path_var.get(),
-            on_save=self._on_settings_save
-        )
-
-    def _on_settings_save(self, path: str):
-        if path:
-            self.custom_output_path_var.set(path)
-            save_config(path=path)
-            self.show_toast("✅ Folder output tersimpan!", "success")
-
-    def _set_thumb_label(self, ctk_image=None, text=""):
-        """Helper aman untuk update thumbnail tanpa error Tcl pyimage dangling."""
-        try:
-            self.thumb_label._label.configure(image="")
-        except Exception:
-            pass
-        self._active_thumb_image = ctk_image
-        if ctk_image:
-            self.thumb_label.configure(image=ctk_image, text="")
-        else:
-            self.thumb_label.configure(image=None, text=text)
-
-    def on_get_info(self):
-        url = self.url_entry.get().strip()
-        if not url:
-            return
-        self.last_video_info = {}
-
-        # ── Visually reset for new URL ─────────────────────────────────────
-        self._set_thumb_label(None, text="🔄 Mengambil Thumbnail...")
-        self.title_label.configure(
-            text="Judul video akan muncul di sini setelah menekan tombol Cek Info."
-        )
-
-        if self._info_container_shown:
-            # Container is already visible — just reset content in-place
-            self.meta_platform.configure(text="")
-            self.meta_date.configure(text="")
-            self.meta_channel.configure(text="")
-            self.meta_duration.configure(text="")
-            self.meta_views.configure(text="")
-            self.meta_likes.configure(text="")
-            self.meta_desc.configure(text="")
-            for widget in self.badges_frame.winfo_children():
-                widget.destroy()
-
-        threading.Thread(target=get_video_info, args=(url,), daemon=True).start()
-
-    def on_download(self):
-        url = self.url_entry.get().strip()
-        if not url:
-            return
-        self.stats_label.configure(text="")
-        self.download_button.configure(
-            text="HENTIKAN UNDUH", fg_color="#EF4444", hover_color="#DC2626",
-            command=self.on_stop
-        )
-        self.url_entry.configure(state="disabled")
-        # Switch to log tab
-        self.right_tabview.set(TAB_LOG)
-
-        threading.Thread(target=download_video_logic, args=(
-            url, self.mode_var.get(), self.audio_only_format_var.get(),
-            self.resolution_var.get(), self.video_codec_var.get(), self.audio_codec_var.get(),
-            self.container_var.get(), self.download_subs_var.get(), self.embed_subs_var.get(),
-            self.subs_lang_var.get().strip(), self.embed_thumb_var.get(),
-            self.use_aria2_var.get(), self.download_playlist_var.get(),
-            self.custom_output_path_var.get(), self.custom_cmd_var.get().strip()
-        ), daemon=True).start()
-
-    def on_stop(self):
-        stop_current_process()
-
-    def on_update(self):
-        self.update_button.configure(state="disabled")
-        threading.Thread(target=update_ytdlp_logic, daemon=True).start()
+                    if speed and eta:
+                        c["stats_text"].value = f"{speed} | ETA: {eta}"
+                    page.update()
+                    
+                elif msg_type == "download_finish" and t_id in app_state["tasks"]:
+                    c = app_state["tasks"][t_id]
+                    c["progress_bar"].value = 1.0
+                    c["progress_bar"].color = ft.Colors.GREEN
+                    c["progress_text"].value = "Selesai!"
+                    c["stats_text"].value = "Tugas rampung."
+                    c["cancel_btn"].visible = False
+                    page.update()
+            except Exception:
+                pass
+
+    threading.Thread(target=process_queue, daemon=True).start()
+
+    page.navigation_bar = ft.NavigationBar(
+        destinations=[
+            ft.NavigationBarDestination(icon=ft.Icons.HOME_OUTLINED, selected_icon=ft.Icons.HOME_ROUNDED, label="Home"),
+            ft.NavigationBarDestination(icon=ft.Icons.DOWNLOAD_OUTLINED, selected_icon=ft.Icons.DOWNLOAD_ROUNDED, label="Tugas"),
+        ],
+        on_change=lambda e: switch_view("home" if e.control.selected_index == 0 else "tasks"),
+        bgcolor=ft.Colors.SURFACE_CONTAINER_LOW
+    )
+    
+    page.add(main_container)
+    switch_view("home")
+    update_pref_row()

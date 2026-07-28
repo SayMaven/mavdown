@@ -1,4 +1,4 @@
 requests
 Pillow
-customtkinter
-nuitka
+flet>=0.86.4
+yt-dlp
