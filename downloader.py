@@ -105,8 +105,14 @@ def update_progress_bar(line):
     ui_queue.put({"type": "log", "text": line})
 
 
-def get_video_info(url):
-    info_options = ["--skip-download", "--print-json", "--no-playlist", "--js-runtimes", f"node:{NODE_PATH}"]
+def get_video_info(url, browser_cookie="Tidak Ada"):
+    info_options = [
+        "--skip-download", "--print-json", "--no-playlist", 
+        "--js-runtimes", f"node:{NODE_PATH}",
+        "--impersonate", "chrome"
+    ]
+    if browser_cookie and browser_cookie.lower() != "tidak ada":
+        info_options.extend(["--cookies-from-browser", browser_cookie.lower()])
     info_command = create_yt_dlp_command(url, options=info_options)
     startupinfo = None
     if os.name == 'nt': 
@@ -436,7 +442,7 @@ def process_downloaded_subtitles(output_dir: str, download_start_time: float, is
     except Exception as e:
         print(f"Error in process_downloaded_subtitles: {e}")
 
-def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container, download_subs, embed_subs, subs_lang, embed_thumb, use_aria2, download_playlist, custom_path, custom_cmd):
+def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container, download_subs, embed_subs, subs_lang, embed_thumb, use_aria2, download_playlist, custom_path, custom_cmd, browser_cookie="Tidak Ada"):
     global current_process
     output_dir = custom_path if custom_path else DEFAULT_OUTPUT_DIR
     
@@ -450,8 +456,17 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
     ui_queue.put({"type": "log", "text": f"URL Sumber: {url}\n"}) 
     ui_queue.put({"type": "log", "text": f"Memulai Unduhan Baru Ke: {output_dir}\n"})
     
-    options = ["--ignore-errors", "--retries", "infinite", "--fragment-retries", "infinite", "--js-runtimes", f"node:{NODE_PATH}"]
+    options = [
+        "--ignore-errors", "--retries", "infinite", 
+        "--fragment-retries", "infinite", 
+        "--js-runtimes", f"node:{NODE_PATH}",
+        "--impersonate", "chrome"
+    ]
     options.append(f"--ffmpeg-location={FFMPEG_PATH}")
+    
+    if browser_cookie and browser_cookie.lower() != "tidak ada":
+        options.extend(["--cookies-from-browser", browser_cookie.lower()])
+        ui_queue.put({"type": "log", "text": f"[OPT] Menggunakan Cookies dari Browser: {browser_cookie}\n"})
     
     if not download_playlist:
         options.append("--no-playlist")
@@ -510,13 +525,24 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
             f_audio_str = "".join(f_audio_parts)
             res_str = "" if res == "best" else f"[height<={res}]"
             
+            # Tambahkan juga constraint pada format "best" (pre-muxed) dan "bestvideo" saja.
+            b_str = f"best{res_str}"
+            if effective_vcodec != "best":
+                b_str += f"[vcodec~={vcodec_map[effective_vcodec]}]"
+            
+            # Jika tidak ada constraint sama sekali, pastikan 'high' diprioritaskan sebelum 'best'
+            # agar tidak salah pilih 'low' di generic extractor.
+            if b_str == "best":
+                b_str = "high/best"
+            
             format_string = (
                 f"{f_video_str}+{f_audio_str}/" 
                 f"{f_video_str}+bestaudio/" 
                 f"bestvideo{res_str}+{f_audio_str}/" 
+                f"{b_str}/"
                 f"bestvideo{res_str}+bestaudio/"
                 f"bestvideo+bestaudio/"
-                "best"
+                f"high/best"
             )
             ui_queue.put({"type": "log", "text": f"[MODE] Video (V: {vcodec}, A: {acodec}, R: {res}p, C: {container})\n"})
             options.extend(["-f", format_string, "--merge-output-format", container])

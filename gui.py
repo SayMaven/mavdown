@@ -9,7 +9,7 @@ from PIL import Image
 import customtkinter as ctk
 from tkinter import filedialog
 
-from config import BASE_DIR, DEFAULT_OUTPUT_DIR, load_config, save_config
+from config import BASE_DIR, DEFAULT_OUTPUT_DIR, load_config, save_config, load_browser_cookie
 from downloader import (
     ui_queue, get_video_info, download_video_logic,
     stop_current_process, update_ytdlp_logic
@@ -91,10 +91,10 @@ QUICK_PRESETS = {
 # Settings Window
 # ===========================================================================
 class SettingsWindow(ctk.CTkToplevel):
-    def __init__(self, parent, current_path: str = "", on_save=None):
+    def __init__(self, parent, current_path: str = "", current_cookie: str = "", on_save=None):
         super().__init__(parent)
         self.title("⚙️ Pengaturan Maven Downloader")
-        self.geometry("480x260")
+        self.geometry("480x330")
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
@@ -103,12 +103,12 @@ class SettingsWindow(ctk.CTkToplevel):
 
         self.update_idletasks()
         px = parent.winfo_x() + (parent.winfo_width() - 480) // 2
-        py = parent.winfo_y() + (parent.winfo_height() - 260) // 2
-        self.geometry(f"480x260+{px}+{py}")
+        py = parent.winfo_y() + (parent.winfo_height() - 330) // 2
+        self.geometry(f"480x330+{px}+{py}")
 
-        self._build_ui(current_path)
+        self._build_ui(current_path, current_cookie)
 
-    def _build_ui(self, current_path: str):
+    def _build_ui(self, current_path: str, current_cookie: str):
         hdr = ctk.CTkFrame(self, fg_color="#181A24", corner_radius=0, height=55)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
@@ -148,6 +148,20 @@ class SettingsWindow(ctk.CTkToplevel):
             command=self._browse_folder
         ).pack(side="left")
 
+        ctk.CTkLabel(
+            inner_dir, text="🍪  Gunakan Cookies dari Browser (Opsional)",
+            font=ctk.CTkFont(size=13, weight="bold"), text_color="#F3F4F6"
+        ).pack(anchor="w", pady=(16, 8))
+
+        self.cookie_var = ctk.StringVar(value=current_cookie)
+        self.cookie_menu = ctk.CTkOptionMenu(
+            inner_dir, variable=self.cookie_var,
+            values=["Tidak Ada", "chrome", "edge", "firefox", "brave", "opera", "vivaldi", "safari"],
+            height=36, corner_radius=8,
+            fg_color="#10111A", button_color="#26293B", button_hover_color="#31354C"
+        )
+        self.cookie_menu.pack(fill="x")
+
         ctk.CTkButton(
             body, text="💾  Simpan Pengaturan",
             command=self._save,
@@ -163,8 +177,9 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def _save(self):
         path = self.path_var.get().strip()
+        cookie = self.cookie_var.get().strip()
         if self.on_save_callback:
-            self.on_save_callback(path)
+            self.on_save_callback(path, cookie)
         try:
             self.grab_release()
         except Exception:
@@ -195,6 +210,7 @@ class App(ctk.CTk):
         self.mode_var = ctk.StringVar(value="video_audio")
         self.custom_cmd_var = ctk.StringVar()
         self.custom_output_path_var = ctk.StringVar(value=load_config())
+        self.browser_cookie_var = ctk.StringVar(value=load_browser_cookie())
         self.audio_only_format_var = ctk.StringVar(value="mp3")
         self.resolution_var = ctk.StringVar(value="1080")
         self.video_codec_var = ctk.StringVar(value="best")
@@ -270,7 +286,12 @@ class App(ctk.CTk):
                 elif msg_type == "info_thumb_data":
                     try:
                         image = Image.open(BytesIO(msg["image_data"]))
-                        ctk_image = ctk.CTkImage(light_image=image, dark_image=image, size=(348, 196))
+                        # Perbaikan Aspect Ratio: Hindari thumbnail gepeng
+                        max_w, max_h = 348, 220
+                        ratio = min(max_w / image.width, max_h / image.height)
+                        new_w = max(1, int(image.width * ratio))
+                        new_h = max(1, int(image.height * ratio))
+                        ctk_image = ctk.CTkImage(light_image=image, dark_image=image, size=(new_w, new_h))
                         self._set_thumb_label(ctk_image, text="")
                     except Exception:
                         self._set_thumb_label(None, text="Gagal memuat preview thumbnail.")
@@ -339,7 +360,7 @@ class App(ctk.CTk):
         ver_badge = ctk.CTkFrame(brand_row, fg_color="#1E1B4B", corner_radius=6)
         ver_badge.pack(side="left", padx=10)
         ctk.CTkLabel(
-            ver_badge, text="v1.7", font=ctk.CTkFont(size=11, weight="bold"),
+            ver_badge, text="v1.1.0", font=ctk.CTkFont(size=11, weight="bold"),
             text_color="#818CF8"
         ).pack(padx=8, pady=2)
 
@@ -378,7 +399,6 @@ class App(ctk.CTk):
         )
         self.url_entry.pack(side="left", fill="x", expand=True, padx=(6, 8))
         self.url_entry.bind("<KeyRelease>", self._on_url_keyrelease)
-        self.url_entry.bind("<FocusIn>", self._on_url_focus)
 
         # Paste button
         ctk.CTkButton(
@@ -483,7 +503,7 @@ class App(ctk.CTk):
         # Thumbnail
         self.thumb_label = ctk.CTkLabel(
             pi, text="Pratinjau Thumbnail",
-            width=358, height=200,
+            width=358, height=220,
             fg_color="#0E0F17", corner_radius=10, text_color="#6B7280"
         )
         self.thumb_label.pack(fill="x", pady=(0, 10))
@@ -1096,7 +1116,8 @@ class App(ctk.CTk):
                     self.use_aria2_var.get(),
                     self.download_playlist_var.get(),
                     self.custom_output_path_var.get(),
-                    self.custom_cmd_var.get().strip()
+                    self.custom_cmd_var.get().strip(),
+                    self.browser_cookie_var.get()
                 )
 
                 # Tunggu sinyal selesai dari process_ui_queue (maks 60 menit)
@@ -1144,19 +1165,7 @@ class App(ctk.CTk):
         url = self.url_entry.get().strip()
         self._update_platform_badge(url)
 
-    def _on_url_focus(self, event=None):
-        """Deteksi URL dari clipboard saat entry difokuskan."""
-        try:
-            clipboard = self.clipboard_get()
-            if clipboard and (
-                clipboard.startswith("http://") or clipboard.startswith("https://")
-            ):
-                current = self.url_entry.get().strip()
-                if not current:
-                    self.url_entry.insert(0, clipboard)
-                    self._update_platform_badge(clipboard)
-        except Exception:
-            pass
+
 
     def _auto_paste(self):
         try:
@@ -1330,13 +1339,15 @@ class App(ctk.CTk):
         self._settings_window = SettingsWindow(
             self,
             current_path=self.custom_output_path_var.get(),
+            current_cookie=self.browser_cookie_var.get(),
             on_save=self._on_settings_save
         )
 
-    def _on_settings_save(self, path: str):
+    def _on_settings_save(self, path: str, cookie: str):
         if path:
             self.custom_output_path_var.set(path)
-            save_config(path=path)
+            self.browser_cookie_var.set(cookie)
+            save_config(path=path, browser_cookie=cookie)
             self.show_toast("✅ Folder output tersimpan!", "success")
 
     def _set_thumb_label(self, ctk_image=None, text=""):
@@ -1375,7 +1386,7 @@ class App(ctk.CTk):
             for widget in self.badges_frame.winfo_children():
                 widget.destroy()
 
-        threading.Thread(target=get_video_info, args=(url,), daemon=True).start()
+        threading.Thread(target=get_video_info, args=(url, self.browser_cookie_var.get()), daemon=True).start()
 
     def on_download(self):
         url = self.url_entry.get().strip()
@@ -1396,7 +1407,8 @@ class App(ctk.CTk):
             self.container_var.get(), self.download_subs_var.get(), self.embed_subs_var.get(),
             self.subs_lang_var.get().strip(), self.embed_thumb_var.get(),
             self.use_aria2_var.get(), self.download_playlist_var.get(),
-            self.custom_output_path_var.get(), self.custom_cmd_var.get().strip()
+            self.custom_output_path_var.get(), self.custom_cmd_var.get().strip(),
+            self.browser_cookie_var.get()
         ), daemon=True).start()
 
     def on_stop(self):

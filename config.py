@@ -34,9 +34,9 @@ def _write_raw_config(data: dict):
     except Exception as e:
         print(f"ERROR saving config: {e}")
 
-def save_config(path: str = None):
+def save_config(path: str = None, browser_cookie: str = None):
     """
-    Simpan folder output unduhan ke config file.
+    Simpan folder output unduhan dan setting browser cookie ke config file.
     """
     data = _read_raw_config()
     if path is not None:
@@ -46,6 +46,9 @@ def save_config(path: str = None):
                 os.makedirs(path, exist_ok=True)
             except Exception:
                 pass
+    if browser_cookie is not None:
+        data["browser_cookie"] = browser_cookie
+        
     _write_raw_config(data)
 
 def load_config() -> str:
@@ -57,3 +60,8 @@ def load_config() -> str:
     if saved_path and os.path.isdir(saved_path):
         return saved_path
     return DEFAULT_OUTPUT_DIR
+
+def load_browser_cookie() -> str:
+    """Kembalikan pengaturan browser cookie."""
+    data = _read_raw_config()
+    return data.get("browser_cookie", "chrome")
