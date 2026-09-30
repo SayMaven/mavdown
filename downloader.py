@@ -8,19 +8,35 @@ from io import BytesIO
 import re
 import json
 import queue
+import html
 
 from config import (
     YT_DLP_PATH, ARIA2_PATH, FFMPEG_PATH, NODE_PATH,
     DEFAULT_OUTPUT_DIR
 )
+from engines import resolve_fast_info, dispatch_fast_download, detect_platform
 
 # Antrean pesan untuk thread safety
 ui_queue = queue.Queue()
 
 current_process = None
+_abort_requested = False
+
+def request_abort():
+    global _abort_requested
+    _abort_requested = True
+
+def reset_abort():
+    global _abort_requested
+    _abort_requested = False
+
+def is_abort_requested():
+    global _abort_requested
+    return _abort_requested
 
 def stop_current_process():
-    global current_process
+    global current_process, _abort_requested
+    _abort_requested = True
     if current_process:
         try:
             pid = current_process.pid
@@ -105,7 +121,96 @@ def update_progress_bar(line):
     ui_queue.put({"type": "log", "text": line})
 
 
-def get_video_info(url, browser_cookie="Tidak Ada"):
+def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
+    # ── Tier 1 Fast Engine Info Check (< 1s) ──
+    try:
+        fast_info = resolve_fast_info(url, share_text=share_text)
+        if fast_info:
+            title = fast_info.get('title', 'Judul Tidak Ditemukan')
+            ui_queue.put({"type": "info_title", "title": f"Judul: {title}"})
+            
+            desc_parts = []
+            author_val = fast_info.get('author') or ''
+            if author_val.lower() in ('douyin user', 'douyinuser', 'user', 'none', 'douyin video', 'kreator douyin', 'akun douyin', 'facebook user', 'facebook', 'facebook media', 'instagram user', 'instagram', 'tiktok user', 'tiktok', 'bilibili creator', 'bilibili user', 'bilibili', 'pinterest user', 'pinterest'):
+                author_val = ''
+            
+            if author_val:
+                desc_parts.append(f"Kreator: {author_val}")
+
+            if fast_info.get('is_slide'):
+                sc = fast_info.get('slide_count', 0)
+                w = fast_info.get('width')
+                h = fast_info.get('height')
+                dim_str = f"({w}x{h})" if w and h else "HD"
+                if sc == 1:
+                    desc_parts.append(f"Foto HD {dim_str}")
+                else:
+                    desc_parts.append(f"Album Slide: {sc} Foto {dim_str}" if sc else f"Album Slide {dim_str}")
+                if fast_info.get('has_audio'):
+                    desc_parts.append("Musik BGM")
+            else:
+                w = fast_info.get('width')
+                h = fast_info.get('height')
+                res_lbl = fast_info.get('resolution_label') or ''
+                fps = fast_info.get('fps')
+                codec = fast_info.get('codec') or ''
+                if res_lbl or (w and h):
+                    res_str = f"{res_lbl} ({w}x{h})" if res_lbl and w and h else (res_lbl or f"{w}x{h}")
+                    desc_parts.append(f"Resolusi: {res_str}")
+                if fps:
+                    desc_parts.append(f"{fps} FPS")
+                if codec:
+                    desc_parts.append(f"Codec: {codec.upper()}")
+            desc_parts.append(f"Diunduh via {fast_info.get('platform', 'Fast Engine')}")
+            desc_text = " · ".join(desc_parts)
+
+            raw_desc = fast_info.get('description') or ''
+            if raw_desc and raw_desc.strip() != title.strip():
+                final_desc = f"{raw_desc.strip()}\n\n{desc_text}"
+            else:
+                final_desc = desc_text
+
+            clean_meta = {
+                'title': fast_info.get('clean_title', title),
+                'uploader': author_val,
+                'duration': fast_info.get('duration', 0),
+                'duration_string': fast_info.get('duration_string', ''),
+                'width': fast_info.get('width'),
+                'height': fast_info.get('height'),
+                'fps': fast_info.get('fps'),
+                'codec': fast_info.get('codec'),
+                'resolution_label': fast_info.get('resolution_label'),
+                'formatted_size': fast_info.get('formatted_size'),
+                'view_count': fast_info.get('view_count', 0),
+                'like_count': fast_info.get('like_count', 0),
+                'is_slide': fast_info.get('is_slide', False),
+                'slide_count': fast_info.get('slide_count', 0),
+                'has_audio': fast_info.get('has_audio', False),
+                'platform': fast_info.get('platform', 'Fast Engine'),
+                'webpage_url': fast_info.get('webpage_url') or url,
+                'url': fast_info.get('url') or url,
+                'description': final_desc
+            }
+            ui_queue.put({"type": "info_data", "data": clean_meta})
+            
+            thumb_url = fast_info.get('thumbnail')
+            if thumb_url and thumb_url.startswith('http'):
+                clean_thumb = html.unescape(thumb_url)
+                try:
+                    is_fb = ('facebook' in clean_thumb or 'fbcdn' in clean_thumb or 'fbsbx' in clean_thumb or fast_info.get('platform') == 'Facebook')
+                    headers = {
+                        'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)' if is_fb else 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                        'Referer': 'https://www.douyin.com/' if 'douyin' in clean_thumb else ''
+                    }
+                    r_thumb = requests.get(clean_thumb, headers=headers, timeout=8)
+                    if r_thumb.status_code == 200 and len(r_thumb.content) > 100:
+                        ui_queue.put({"type": "info_thumb_data", "image_data": r_thumb.content})
+                except Exception:
+                    pass
+            return
+    except Exception:
+        pass
+
     info_options = [
         "--skip-download", "--print-json", "--no-playlist", 
         "--js-runtimes", f"node:{NODE_PATH}",
@@ -424,7 +529,7 @@ def process_downloaded_subtitles(output_dir: str, download_start_time: float, is
                     try:
                         os.remove(v_path)
                         os.rename(temp_embed_path, v_path)
-                        ui_queue.put({"type": "log", "text": f"[EMBED SUB] ✨ Subtitle berhasil di-embed ke track P0! Langsung aktif saat diputar & tetap bisa di-OFF kan.\n"})
+                        ui_queue.put({"type": "log", "text": f"[EMBED SUB] Subtitle berhasil di-embed ke track P0! Langsung aktif saat diputar & tetap bisa di-OFF kan.\n"})
                     except Exception as e:
                         ui_queue.put({"type": "log", "text": f"[EMBED ERROR] Gagal mengganti file: {e}\n"})
                 else:
@@ -442,7 +547,7 @@ def process_downloaded_subtitles(output_dir: str, download_start_time: float, is
     except Exception as e:
         print(f"Error in process_downloaded_subtitles: {e}")
 
-def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container, download_subs, embed_subs, subs_lang, embed_thumb, use_aria2, download_playlist, custom_path, custom_cmd, browser_cookie="Tidak Ada"):
+def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container, download_subs, embed_subs, subs_lang, embed_thumb, use_aria2, download_playlist, custom_path, custom_cmd, browser_cookie="Tidak Ada", share_text=None):
     global current_process
     output_dir = custom_path if custom_path else DEFAULT_OUTPUT_DIR
     
@@ -456,11 +561,46 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
     ui_queue.put({"type": "log", "text": f"URL Sumber: {url}\n"}) 
     ui_queue.put({"type": "log", "text": f"Memulai Unduhan Baru Ke: {output_dir}\n"})
     
+    reset_abort()
+
+    # ── TIER 1: FAST REST ENGINE ──
+    if not download_playlist and not custom_cmd:
+        engine_opts = {
+            'mode': mode,
+            'audio_format': audio_format,
+            'resolution': res,
+            'video_codec': vcodec,
+            'audio_codec': acodec,
+            'container': container,
+            'embed_thumb': embed_thumb,
+            'share_text': share_text
+        }
+        try:
+            fast_success = dispatch_fast_download(
+                url, output_dir, ui_queue, engine_opts,
+                abort_checker=is_abort_requested
+            )
+            if fast_success:
+                ui_queue.put({"type": "download_finish"})
+                return
+            elif is_abort_requested():
+                ui_queue.put({"type": "download_finish"})
+                return
+            else:
+                platform_name = detect_platform(url)
+                if platform_name != 'generic':
+                    ui_queue.put({"type": "log", "text": f"\n[TIER 2] Melanjutkan ke Engine Fallback (yt-dlp + aria2c)...\n"})
+        except Exception as e:
+            ui_queue.put({"type": "log", "text": f"[TIER 1 WARNING] Terjadi kendala di Tier 1: {e}\n[TIER 2] Mengalihkan ke yt-dlp...\n"})
+
     options = [
         "--ignore-errors", "--retries", "infinite", 
         "--fragment-retries", "infinite", 
         "--js-runtimes", f"node:{NODE_PATH}",
-        "--impersonate", "chrome"
+        "--impersonate", "chrome",
+        "--windows-filenames",
+        "--trim-filenames", "100",
+        "--embed-metadata"
     ]
     options.append(f"--ffmpeg-location={FFMPEG_PATH}")
     
@@ -492,12 +632,14 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
             ui_queue.put({"type": "log", "text": "[OPT] Menggunakan Aria2c sebagai downloader.\n"})
             
         if mode == "audio_only":
-            options.extend(["-f", "bestaudio", "--extract-audio", "--audio-format", audio_format])
-            ui_queue.put({"type": "log", "text": f"[MODE] Audio Saja ({audio_format})\n"})
+            effective_afmt = "mp3" if audio_format in ("auto", "best", "") else audio_format
+            options.extend(["-f", "bestaudio", "--extract-audio", "--audio-format", effective_afmt])
+            ui_queue.put({"type": "log", "text": f"[MODE] Audio Saja ({effective_afmt})\n"})
         else:
             effective_vcodec = vcodec
             effective_acodec = acodec
-            if container == "webm":
+            effective_container = "mp4" if container in ("auto", "best", "") else container
+            if effective_container == "webm":
                 if effective_vcodec == "h264":
                     effective_vcodec = "vp9"
                 if effective_acodec == "m4a":
@@ -544,8 +686,18 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
                 f"bestvideo+bestaudio/"
                 f"high/best"
             )
-            ui_queue.put({"type": "log", "text": f"[MODE] Video (V: {vcodec}, A: {acodec}, R: {res}p, C: {container})\n"})
-            options.extend(["-f", format_string, "--merge-output-format", container])
+            # Optimasi khusus Bilibili pada fallback yt-dlp jika tanpa cookies login:
+            # Akun guest Bilibili di CDN Akamai memutus koneksi (Error 492) jika meminta 1080p.
+            # Otomatis batasi ke 720p HD jika tanpa cookies agar tidak gagal / putus di 16KB.
+            if detect_platform(url) == 'bilibili' and (not browser_cookie or browser_cookie.lower() == "tidak ada") and res == "best":
+                format_string = (
+                    "bestvideo[height<=720]+bestaudio/"
+                    "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/"
+                    "best[height<=720]/best"
+                )
+
+            ui_queue.put({"type": "log", "text": f"[MODE] Video (V: {vcodec}, A: {acodec}, R: {res}, C: {container})\n"})
+            options.extend(["-f", format_string, "--merge-output-format", effective_container])
             
         if download_subs or embed_subs:
             lang = subs_lang.strip() if subs_lang.strip() else "id,en"
@@ -565,22 +717,25 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
                     ui_queue.put({"type": "log", "text": f"[OPT] Subtitle ({lang}) file .srt terpisah.\n"})
                 
         if embed_thumb:
+            effective_afmt = "mp3" if audio_format in ("auto", "best", "", None) else str(audio_format).lower()
+            effective_cont = "mp4" if container in ("auto", "best", "", None) else str(container).lower()
             thumb_supported = False
             if mode == "audio_only":
-                if audio_format in ["mp3", "m4a", "flac", "opus", "ogg"]:
+                if effective_afmt in ["mp3", "m4a", "flac", "opus", "ogg"]:
                     thumb_supported = True
             else:
-                if container in ["mp4", "mkv", "mov"]:
+                if effective_cont in ["mp4", "mkv", "mov"]:
                     thumb_supported = True
                     
             if thumb_supported:
                 options.append("--embed-thumbnail")
-                ui_queue.put({"type": "log", "text": "[OPT] Thumbnail di-embed.\n"})
+                options.extend(["--convert-thumbnails", "jpg"])
+                ui_queue.put({"type": "log", "text": "[OPT] Injeksi Thumbnail (Album Art) diaktifkan.\n"})
             else:
-                target_fmt = audio_format if mode == "audio_only" else container
+                target_fmt = effective_afmt if mode == "audio_only" else effective_cont
                 ui_queue.put({"type": "log", "text": f"[INFO] Format .{target_fmt} tidak mendukung embed thumbnail. Opsi embed thumbnail dilewati.\n"})
                 
-        options.extend(["-o", os.path.join(output_dir, "%(title)s.%(ext)s")])
+        options.extend(["-o", os.path.join(output_dir, "%(title).100s.%(ext)s")])
         
     command = create_yt_dlp_command(url, options)
     ui_queue.put({"type": "log", "text": f"\nPerintah: {' '.join(command)}\n"})

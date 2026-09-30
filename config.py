@@ -11,6 +11,7 @@ else:
 YT_DLP_PATH = os.path.join(BASE_DIR, "bin", "yt-dlp.exe")
 ARIA2_PATH = os.path.join(BASE_DIR, "bin", "aria2c.exe")
 FFMPEG_PATH = os.path.join(BASE_DIR, "bin", "ffmpeg.exe") 
+FFPROBE_PATH = os.path.join(BASE_DIR, "bin", "ffprobe.exe")
 NODE_PATH = os.path.join(BASE_DIR, "bin", "node.exe")
 
 DEFAULT_OUTPUT_DIR = os.path.join(BASE_DIR, "downloads")
