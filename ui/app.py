@@ -9,7 +9,11 @@ from PIL import Image
 import customtkinter as ctk
 from tkinter import filedialog
 
-from config import BASE_DIR, DEFAULT_OUTPUT_DIR, load_config, save_config, load_browser_cookie
+from config import (
+    BASE_DIR, DEFAULT_OUTPUT_DIR, load_config, save_config,
+    load_browser_cookie, load_preferences, save_preferences, is_aria2_available,
+    load_ytdlp_channel, save_ytdlp_channel
+)
 from downloader import (
     ui_queue, get_video_info, download_video_logic,
     stop_current_process, update_ytdlp_logic
@@ -18,11 +22,11 @@ from ui.constants import (
     APP_VERSION, APP_TITLE, THEME, PLATFORM_PATTERNS,
     QUICK_PRESETS, LANG_PRESETS
 )
-from ui.settings_dialog import SettingsWindow
 from ui.sidebar import build_sidebar
 from ui.studio_view import build_studio_view
 from ui.queue_view import build_queue_view
 from ui.log_view import build_log_view
+from ui.settings_view import build_settings_view
 
 class App(ctk.CTk):
     def __init__(self):
@@ -45,6 +49,7 @@ class App(ctk.CTk):
         self.custom_cmd_var = ctk.StringVar()
         self.custom_output_path_var = ctk.StringVar(value=load_config())
         self.browser_cookie_var = ctk.StringVar(value=load_browser_cookie())
+        self.ytdlp_channel_var = ctk.StringVar(value=load_ytdlp_channel())
         self.audio_only_format_var = ctk.StringVar(value="auto")
         self.resolution_var = ctk.StringVar(value="best")
         self.video_codec_var = ctk.StringVar(value="best")
@@ -54,7 +59,7 @@ class App(ctk.CTk):
         self.embed_subs_var = ctk.BooleanVar(value=False)
         self.subs_lang_var = ctk.StringVar(value="id,en")
         self.embed_thumb_var = ctk.BooleanVar(value=True)
-        self.use_aria2_var = ctk.BooleanVar(value=False)
+        self.use_aria2_var = ctk.BooleanVar(value=is_aria2_available())
         self.download_playlist_var = ctk.BooleanVar(value=False)
 
         # ── Runtime State ────────────────────────────────────────────────────
@@ -62,12 +67,16 @@ class App(ctk.CTk):
         self._last_log_text: str = ""
         self._settings_window = None
         self._active_thumb_image = None
+        self._active_toast = None
         self._current_active_view: str = "studio"
         self._queue_done_event = threading.Event()
         self._queue_running: bool = False
         self._queue_items = []
+        self._prefs_loading: bool = False
 
         self.setup_ui()
+        self._load_and_apply_preferences()
+        self._setup_pref_traces()
         self.after(100, self.process_ui_queue)
 
     # =========================================================================
@@ -192,6 +201,7 @@ class App(ctk.CTk):
         self.studio_view = build_studio_view(self, self.views_container)
         self.queue_view = build_queue_view(self, self.views_container)
         self.log_view = build_log_view(self, self.views_container)
+        self.settings_view_frame = build_settings_view(self, self.views_container)
 
         self.show_studio_view()
         self.toggle_opts()
@@ -203,19 +213,29 @@ class App(ctk.CTk):
         self._switch_nav_active("studio")
         self.queue_view.pack_forget()
         self.log_view.pack_forget()
+        self.settings_view_frame.pack_forget()
         self.studio_view.pack(fill="both", expand=True)
 
     def show_queue_view(self):
         self._switch_nav_active("queue")
         self.studio_view.pack_forget()
         self.log_view.pack_forget()
+        self.settings_view_frame.pack_forget()
         self.queue_view.pack(fill="both", expand=True)
 
     def show_log_view(self):
         self._switch_nav_active("log")
         self.studio_view.pack_forget()
         self.queue_view.pack_forget()
+        self.settings_view_frame.pack_forget()
         self.log_view.pack(fill="both", expand=True)
+
+    def show_settings_view(self):
+        self._switch_nav_active("settings")
+        self.studio_view.pack_forget()
+        self.queue_view.pack_forget()
+        self.log_view.pack_forget()
+        self.settings_view_frame.pack(fill="both", expand=True)
 
     def _switch_nav_active(self, active_key: str):
         self._current_active_view = active_key
@@ -309,6 +329,15 @@ class App(ctk.CTk):
 
                     elif msg_type == "update_finish":
                         self.update_btn.configure(state="normal", text="Update yt-dlp")
+                        if hasattr(self, "settings_update_btn") and self.settings_update_btn.winfo_exists():
+                            self.settings_update_btn.configure(state="normal", text="Update yt-dlp")
+                        if hasattr(self, "settings_ytdlp_ver_label") and self.settings_ytdlp_ver_label.winfo_exists():
+                            try:
+                                from downloader import get_local_ytdlp_version
+                                cur_ver = get_local_ytdlp_version() or "Terpasang"
+                                self.settings_ytdlp_ver_label.configure(text=f"v{cur_ver}")
+                            except Exception:
+                                pass
                         self.progress_bar.set(1.0)
                         self.progress_label.configure(text="Status: Update Selesai")
                         self.show_toast("yt-dlp berhasil diperbarui!", "success")
@@ -768,29 +797,36 @@ class App(ctk.CTk):
         af_map = {"auto": "Auto", "mp3": "MP3", "m4a": "M4A", "flac": "FLAC", "wav": "WAV", "opus": "OPUS"}
         self.audio_fmt_segmented.set(af_map.get(p["audio_format"], "Auto"))
         self.toggle_opts()
+        self._save_current_preferences()
         self.show_toast(f"Preset '{preset_name}' diterapkan.", "info")
 
     def on_mode_segment_change(self, value):
         self.mode_var.set("audio_only" if "Audio" in value and "Video" not in value and "Slide" not in value else "video_audio")
         self.toggle_opts()
+        self._save_current_preferences()
 
     def on_video_fmt_change(self, value):
         self.container_var.set("auto" if value == "Auto" else value.lower())
+        self._save_current_preferences()
 
     def on_audio_fmt_change(self, value):
         self.audio_only_format_var.set("auto" if value == "Auto" else value.lower())
+        self._save_current_preferences()
 
     def on_vcodec_change(self, value):
         self.video_codec_var.set({"Auto": "best", "H.264": "h264", "VP9": "vp9", "AV1": "av1"}.get(value, "best"))
+        self._save_current_preferences()
 
     def on_acodec_change(self, value):
         self.audio_codec_var.set({"Auto": "best", "M4A": "m4a", "Opus": "opus"}.get(value, "best"))
+        self._save_current_preferences()
 
     def on_res_segmented_change(self, value):
         self.resolution_var.set(
             {"Auto": "best", "Best": "best", "4K": "2160", "1440p": "1440",
              "1080p": "1080", "720p": "720", "480p": "480", "360p": "360"}.get(value, "best")
         )
+        self._save_current_preferences()
 
     def on_lang_preset_change(self, value):
         code = LANG_PRESETS.get(value, "id,en")
@@ -798,6 +834,7 @@ class App(ctk.CTk):
             self.subs_lang_var.set(code)
         else:
             self.lang_entry.focus()
+        self._save_current_preferences()
 
     def toggle_opts(self):
         if not (hasattr(self, 'video_opts') and hasattr(self, 'audio_opts')):
@@ -852,9 +889,104 @@ class App(ctk.CTk):
                 self.lang_label.configure(text="SUBTITLE & LIRIK OTOMATIS")
 
     # =========================================================================
+    # Preferences Persistence
+    # =========================================================================
+    def _load_and_apply_preferences(self):
+        """Muat preferensi tersimpan dan terapkan ke seluruh widget UI."""
+        prefs = load_preferences()
+        if not prefs:
+            return
+
+        self._prefs_loading = True
+        try:
+            mode = prefs.get("mode", "video_audio")
+            self.mode_var.set(mode)
+            if hasattr(self, 'mode_segmented'):
+                self.mode_segmented.set(
+                    "Audio Saja (Musik)" if mode == "audio_only" else "Video + Audio"
+                )
+
+            container = prefs.get("container", "auto")
+            self.container_var.set(container)
+            if hasattr(self, 'video_fmt_segmented'):
+                c_map = {"auto": "Auto", "mp4": "MP4", "mkv": "MKV", "webm": "WEBM", "mov": "MOV"}
+                self.video_fmt_segmented.set(c_map.get(container, "Auto"))
+
+            af = prefs.get("audio_format", "auto")
+            self.audio_only_format_var.set(af)
+            if hasattr(self, 'audio_fmt_segmented'):
+                af_map = {"auto": "Auto", "mp3": "MP3", "m4a": "M4A",
+                          "flac": "FLAC", "wav": "WAV", "opus": "OPUS"}
+                self.audio_fmt_segmented.set(af_map.get(af, "Auto"))
+
+            res = prefs.get("resolution", "best")
+            self.resolution_var.set(res)
+            if hasattr(self, 'res_segmented'):
+                r_map = {"best": "Auto", "2160": "4K", "1440": "1440p",
+                         "1080": "1080p", "720": "720p", "480": "480p", "360": "360p"}
+                self.res_segmented.set(r_map.get(res, "Auto"))
+
+            vc = prefs.get("video_codec", "best")
+            self.video_codec_var.set(vc)
+            if hasattr(self, 'v_codec_segmented'):
+                vc_map = {"best": "Auto", "h264": "H.264", "vp9": "VP9", "av1": "AV1"}
+                self.v_codec_segmented.set(vc_map.get(vc, "Auto"))
+
+            ac = prefs.get("audio_codec", "best")
+            self.audio_codec_var.set(ac)
+            if hasattr(self, 'a_codec_segmented'):
+                ac_map = {"best": "Auto", "m4a": "M4A", "opus": "Opus"}
+                self.a_codec_segmented.set(ac_map.get(ac, "Auto"))
+
+            self.embed_thumb_var.set(prefs.get("embed_thumbnail", True))
+            self.use_aria2_var.set(prefs.get("use_aria2", is_aria2_available()))
+            self.download_subs_var.set(prefs.get("download_subs", False))
+            self.embed_subs_var.set(prefs.get("embed_subs", False))
+            self.download_playlist_var.set(prefs.get("download_playlist", False))
+            self.subs_lang_var.set(prefs.get("subs_lang", "id,en"))
+
+            self.toggle_opts()
+        finally:
+            self._prefs_loading = False
+
+    def _save_current_preferences(self):
+        """Simpan seluruh state preferensi terkini ke config file."""
+        if getattr(self, '_prefs_loading', False):
+            return
+        prefs = {
+            "mode": self.mode_var.get(),
+            "audio_format": self.audio_only_format_var.get(),
+            "resolution": self.resolution_var.get(),
+            "video_codec": self.video_codec_var.get(),
+            "audio_codec": self.audio_codec_var.get(),
+            "container": self.container_var.get(),
+            "embed_thumbnail": self.embed_thumb_var.get(),
+            "use_aria2": self.use_aria2_var.get(),
+            "download_subs": self.download_subs_var.get(),
+            "embed_subs": self.embed_subs_var.get(),
+            "subs_lang": self.subs_lang_var.get(),
+            "download_playlist": self.download_playlist_var.get(),
+        }
+        save_preferences(prefs)
+
+    def _setup_pref_traces(self):
+        """Pasang trace pada BooleanVar agar preferensi tersimpan otomatis."""
+        for var in [self.embed_thumb_var, self.use_aria2_var, self.download_subs_var,
+                    self.embed_subs_var, self.download_playlist_var]:
+            var.trace_add("write", lambda *_: self._save_current_preferences())
+
+    # =========================================================================
     # Toast Notification
     # =========================================================================
     def show_toast(self, message: str, toast_type: str = "info"):
+        if self._active_toast:
+            try:
+                if self._active_toast.winfo_exists():
+                    self._active_toast.destroy()
+            except Exception:
+                pass
+            self._active_toast = None
+
         colors = {
             "success": THEME["accent_emerald"],
             "error":   THEME["accent_rose"],
@@ -869,7 +1001,7 @@ class App(ctk.CTk):
             toast.attributes("-topmost", True)
             toast.configure(fg_color=bg)
 
-            w, h = 360, 52
+            w, h = 380, 52
             self.update_idletasks()
             x = self.winfo_x() + self.winfo_width() - w - 24
             y = self.winfo_y() + self.winfo_height() - h - 50
@@ -878,10 +1010,21 @@ class App(ctk.CTk):
             ctk.CTkLabel(
                 toast, text=message, text_color="white",
                 font=ctk.CTkFont(size=12, weight="bold"),
-                wraplength=330, anchor="w", justify="left"
+                wraplength=350, anchor="w", justify="left"
             ).pack(fill="both", expand=True, padx=14, pady=8)
 
-            toast.after(3000, lambda: toast.destroy() if toast.winfo_exists() else None)
+            self._active_toast = toast
+            toast.after(3500, lambda: self._dismiss_toast(toast))
+        except Exception:
+            pass
+
+    def _dismiss_toast(self, toast):
+        """Hapus toast notification secara aman."""
+        try:
+            if toast.winfo_exists():
+                toast.destroy()
+            if self._active_toast == toast:
+                self._active_toast = None
         except Exception:
             pass
 
@@ -918,15 +1061,7 @@ class App(ctk.CTk):
             subprocess.Popen(["xdg-open", path])
 
     def open_settings(self):
-        if self._settings_window and self._settings_window.winfo_exists():
-            self._settings_window.focus()
-            return
-        self._settings_window = SettingsWindow(
-            self,
-            current_path=self.custom_output_path_var.get(),
-            current_cookie=self.browser_cookie_var.get(),
-            on_save=self._on_settings_save
-        )
+        self.show_settings_view()
 
     def _on_settings_save(self, path: str, cookie: str):
         if path:
@@ -1025,6 +1160,9 @@ class App(ctk.CTk):
     def on_stop(self):
         stop_current_process()
 
-    def on_update(self):
+    def on_update(self, channel: str = None):
+        target_channel = channel or self.ytdlp_channel_var.get() or "stable"
         self.update_btn.configure(state="disabled", text="Memeriksa...")
-        threading.Thread(target=update_ytdlp_logic, daemon=True).start()
+        if hasattr(self, "settings_update_btn") and self.settings_update_btn.winfo_exists():
+            self.settings_update_btn.configure(state="disabled", text="Memeriksa...")
+        threading.Thread(target=update_ytdlp_logic, args=(target_channel,), daemon=True).start()

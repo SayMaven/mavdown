@@ -65,4 +65,30 @@ def load_config() -> str:
 def load_browser_cookie() -> str:
     """Kembalikan pengaturan browser cookie."""
     data = _read_raw_config()
-    return data.get("browser_cookie", "chrome")
+    return data.get("browser_cookie", "")
+
+def save_preferences(prefs: dict):
+    """Simpan preferensi UI lengkap ke config file."""
+    data = _read_raw_config()
+    data["preferences"] = prefs
+    _write_raw_config(data)
+
+def load_preferences() -> dict:
+    """Muat preferensi UI tersimpan."""
+    data = _read_raw_config()
+    return data.get("preferences", {})
+
+def is_aria2_available() -> bool:
+    """Cek apakah aria2c.exe tersedia di direktori bin."""
+    return os.path.isfile(ARIA2_PATH)
+
+def save_ytdlp_channel(channel: str):
+    """Simpan channel update yt-dlp ('stable' atau 'nightly')."""
+    data = _read_raw_config()
+    data["ytdlp_channel"] = channel
+    _write_raw_config(data)
+
+def load_ytdlp_channel() -> str:
+    """Muat channel update yt-dlp tersimpan (default: 'stable')."""
+    data = _read_raw_config()
+    return data.get("ytdlp_channel", "stable")

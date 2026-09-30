@@ -1,6 +1,6 @@
 # Maven Downloader (Mavdown) v1.2.0
 
-![Maven Downloader Screenshot](https://res.cloudinary.com/ds4a54vuy/image/upload/v1785133143/Screenshot_mavdown_1_7.png)
+![Maven Downloader Screenshot](https://res.cloudinary.com/ds4a54vuy/image/upload/v1790796075/Screenshot_mavdown_1_2.png)
 
 **Maven Downloader (Mavdown)** adalah aplikasi desktop modern berbasis Python & CustomTkinter yang dirancang untuk mengunduh media (video, album slide foto, dan audio) dari berbagai platform global dengan kecepatan maksimal dan arsitektur *Multi-Tier Engine*.
 
@@ -48,6 +48,12 @@ Aplikasi ini menggabungkan **Tier 1 Fast REST Scraping Engine** (ekstraksi insta
   - Akses satu klik untuk profil favorit: *Super Quality*, *Musik MP3*, *Hemat Data (H.264 720p)*, dan *Podcast*.
 - **Injeksi Thumbnail & Metadata**:
   - Opsi menanamkan cover art asli dan metadata (Judul, Kreator, Tanggal) ke dalam berkas media `.mp4`, `.mkv`, `.mp3`, `.m4a`.
+- **Tab Pengaturan Terpadu (Inline Settings View)**:
+  - Tab navigasi pengaturan lengkap tanpa popup terpisah.
+  - **ThemedDropdown**: Dropdown dark-mode kustom dengan pembatas tegas, kontras warna rapi, dan popup menu sinkron tanpa border putih OS bawaan.
+  - **Impor Cookie Browser**: Bypass login dan anti-bot dengan cookie otomatis dari Chrome, Firefox, Edge, Brave, Opera, atau Vivaldi.
+  - **Pembaruan Engine yt-dlp Multi-Channel**: Dukungan pembaruan channel **Versi Stable** (rilis berkala teruji) dan **Versi Nightly** (build harian otomatis terbaru dari upstream).
+  - **Reset Preferensi Pabrik**: Mengembalikan seluruh konfigurasi format/codec/opsi ke nilai default dengan satu klik.
 
 ---
 
@@ -56,6 +62,7 @@ Aplikasi ini menggabungkan **Tier 1 Fast REST Scraping Engine** (ekstraksi insta
 ```text
 mavdown/
 ├── assets/           # Ikon aplikasi dan aset grafis
+│   └── old/          # Arsip aset terdahulu
 ├── bin/              # Pustaka biner mandiri (yt-dlp.exe, aria2c.exe, ffmpeg.exe, ffprobe.exe, node.exe)
 ├── dist/             # (Otomatis) Hasil rilis kompilasi Nuitka
 ├── downloads/        # Folder bawaan hasil unduhan media
@@ -72,9 +79,14 @@ mavdown/
 ├── ui/               # Arsitektur antarmuka modular
 │   ├── app.py        # Controller utama GUI, event binding, UI queue worker
 │   ├── constants.py  # Palet tema, konfigurasi preset, pola platform regex
-│   └── settings.py   # Jendela dialog pengaturan direktori & cookies
-├── config.py         # Manajer konfigurasi path & pembaca file config.json
-├── config.json       # (Otomatis) Preferensi folder dan browser cookies tersimpan
+│   ├── sidebar.py    # Komponen navigasi sidebar, quick presets, dan mini status
+│   ├── studio_view.py# Panel utama studio inspeksi & konfigurasi download
+│   ├── queue_view.py # Panel antrean download batch & impor file URL
+│   ├── log_view.py   # Panel konsol log aktivitas real-time
+│   ├── settings_view.py # Panel inline pengaturan direktori, cookie, & update engine
+│   └── widgets.py    # Komponen UI modern kustom (ThemedDropdown)
+├── config.py         # Manajer konfigurasi path, preferensi, & pembaca config.json
+├── config.json       # (Otomatis) Preferensi folder, channel update, dan cookies tersimpan
 ├── downloader.py     # Core controller unduhan, orchestrator yt-dlp, dan lirik konverter
 ├── gui.py            # Gateway backward-compatibility untuk modul UI
 ├── mavdown.py        # Titik masuk utama aplikasi (Entry Point)

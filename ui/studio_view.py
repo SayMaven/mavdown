@@ -96,7 +96,7 @@ def build_studio_view(app, parent):
     right_studio.grid(row=0, column=1, sticky="nsew")
 
     rs_in = ctk.CTkFrame(right_studio, fg_color="transparent")
-    rs_in.pack(fill="both", expand=True, padx=12, pady=12)
+    rs_in.pack(fill="both", expand=True, padx=16, pady=16)
 
     # ── Section 1: Mode Switcher ──────────────────────────────────────
     sec_mode = ctk.CTkFrame(rs_in, fg_color=THEME["card_inner"], corner_radius=10)

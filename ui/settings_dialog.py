@@ -1,16 +1,24 @@
+import os
 import customtkinter as ctk
 from tkinter import filedialog
-from config import DEFAULT_OUTPUT_DIR
+from config import BASE_DIR, DEFAULT_OUTPUT_DIR
 from ui.constants import APP_VERSION
 
 class SettingsWindow(ctk.CTkToplevel):
     def __init__(self, parent, current_path: str = "", current_cookie: str = "", on_save=None):
         super().__init__(parent)
         self.title("Pengaturan Maven Downloader")
-        self.geometry("500x360")
+        self.geometry("500x440")
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
+        self._app = parent
+
+        try:
+            icon_path = os.path.join(BASE_DIR, "assets", "waifu_icon.ico")
+            self.after(200, lambda: self.iconbitmap(icon_path))
+        except Exception:
+            pass
 
         self.on_save_callback = on_save
         self.configure(fg_color="#0D0E16")
@@ -77,9 +85,24 @@ class SettingsWindow(ctk.CTkToplevel):
             container,
             text="Berguna jika mengunduh konten privat / restricted yang membutuhkan sesi login.",
             font=ctk.CTkFont(size=10), text_color="#6B7280", wraplength=450, justify="left"
-        ).pack(anchor="w", pady=(0, 18))
+        ).pack(anchor="w", pady=(0, 14))
 
-        # ── Action Buttons ────────────────────────────────────────────────
+        # Reset Preferences Section
+        ctk.CTkFrame(container, height=1, fg_color="#1E2032").pack(fill="x", pady=(0, 14))
+
+        reset_row = ctk.CTkFrame(container, fg_color="transparent")
+        reset_row.pack(fill="x", pady=(0, 18))
+        ctk.CTkLabel(
+            reset_row, text="Reset Preferensi Format:",
+            font=ctk.CTkFont(size=12, weight="bold"), text_color="#D1D5DB"
+        ).pack(side="left")
+        ctk.CTkButton(
+            reset_row, text="Reset ke Default", width=120, height=30, corner_radius=6,
+            fg_color="#1E2030", hover_color="#2B2E45", text_color="#EF4444",
+            font=ctk.CTkFont(size=11), command=self._reset_prefs
+        ).pack(side="right")
+
+        # Action Buttons
         btn_row = ctk.CTkFrame(container, fg_color="transparent")
         btn_row.pack(fill="x", side="bottom")
 
@@ -110,3 +133,34 @@ class SettingsWindow(ctk.CTkToplevel):
         except Exception:
             pass
         self.after(20, self.destroy)
+
+    def _reset_prefs(self):
+        """Reset semua preferensi format ke default pabrik."""
+        from config import save_preferences, is_aria2_available
+        save_preferences({})
+        app = self._app
+        app._prefs_loading = True
+        try:
+            app.mode_var.set("video_audio")
+            app.mode_segmented.set("Video + Audio")
+            app.container_var.set("auto")
+            app.video_fmt_segmented.set("Auto")
+            app.audio_only_format_var.set("auto")
+            app.audio_fmt_segmented.set("Auto")
+            app.resolution_var.set("best")
+            app.res_segmented.set("Auto")
+            app.video_codec_var.set("best")
+            app.v_codec_segmented.set("Auto")
+            app.audio_codec_var.set("best")
+            app.a_codec_segmented.set("Auto")
+            app.embed_thumb_var.set(True)
+            app.use_aria2_var.set(is_aria2_available())
+            app.download_subs_var.set(False)
+            app.embed_subs_var.set(False)
+            app.download_playlist_var.set(False)
+            app.subs_lang_var.set("id,en")
+            app.toggle_opts()
+        finally:
+            app._prefs_loading = False
+        if hasattr(app, 'show_toast'):
+            app.show_toast("Preferensi direset ke default.", "info")

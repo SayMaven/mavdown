@@ -797,26 +797,52 @@ def get_local_ytdlp_version():
         pass
     return None
 
-def get_latest_ytdlp_version():
-    try:
-        r = requests.head('https://github.com/yt-dlp/yt-dlp/releases/latest', allow_redirects=True, timeout=10)
-        tag = r.url.split('/')[-1]
-        if tag and tag.lower() != 'latest':
-            return tag.lstrip('v')
-    except Exception:
-        pass
-    try:
-        r = requests.get('https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest', timeout=10)
-        if r.status_code == 200:
-            tag = r.json().get('tag_name', '')
-            return tag.lstrip('v')
-    except Exception:
-        pass
-    return None
+def get_latest_ytdlp_version(channel: str = "stable"):
+    channel = (channel or "stable").lower()
+    if channel == "nightly":
+        try:
+            r = requests.head('https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest', allow_redirects=True, timeout=10)
+            tag = r.url.split('/')[-1]
+            if tag and tag.lower() != 'latest':
+                return tag.lstrip('v')
+        except Exception:
+            pass
+        try:
+            r = requests.get('https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest', timeout=10)
+            if r.status_code == 200:
+                tag = r.json().get('tag_name', '')
+                return tag.lstrip('v')
+        except Exception:
+            pass
+        return None
+    else:
+        try:
+            r = requests.head('https://github.com/yt-dlp/yt-dlp/releases/latest', allow_redirects=True, timeout=10)
+            tag = r.url.split('/')[-1]
+            if tag and tag.lower() != 'latest':
+                return tag.lstrip('v')
+        except Exception:
+            pass
+        try:
+            r = requests.get('https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest', timeout=10)
+            if r.status_code == 200:
+                tag = r.json().get('tag_name', '')
+                return tag.lstrip('v')
+        except Exception:
+            pass
+        return None
 
-def update_ytdlp_logic():
-    ui_queue.put({"type": "progress", "value": 0.05, "text": "Memeriksa versi..."})
-    ui_queue.put({"type": "log", "text": "\n\n=== MEMERIKSA UPDATE YT-DLP ===\n"})
+def update_ytdlp_logic(channel: str = "stable"):
+    channel = (channel or "stable").lower()
+    channel_title = "NIGHTLY" if channel == "nightly" else "STABLE"
+    url = (
+        "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe"
+        if channel == "nightly" else
+        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+    )
+
+    ui_queue.put({"type": "progress", "value": 0.05, "text": f"Memeriksa versi ({channel_title})..."})
+    ui_queue.put({"type": "log", "text": f"\n\n=== MEMERIKSA UPDATE YT-DLP ({channel_title}) ===\n"})
     
     old_path = YT_DLP_PATH + ".old"
     if not os.path.exists(YT_DLP_PATH) and os.path.exists(old_path):
@@ -832,26 +858,26 @@ def update_ytdlp_logic():
     else:
         ui_queue.put({"type": "log", "text": "Versi Terpasang : Belum Terpasang\n"})
 
-    ui_queue.put({"type": "log", "text": "Memeriksa versi terbaru di GitHub...\n"})
-    latest_ver = get_latest_ytdlp_version()
+    ui_queue.put({"type": "log", "text": f"Channel Dipilih : {channel_title}\n"})
+    ui_queue.put({"type": "log", "text": f"Memeriksa rilis terbaru di GitHub ({channel_title})...\n"})
+    latest_ver = get_latest_ytdlp_version(channel)
     
     if latest_ver:
         ui_queue.put({"type": "log", "text": f"Versi Terbaru   : v{latest_ver}\n"})
     else:
-        ui_queue.put({"type": "log", "text": "Versi Terbaru   : Gagal mengambil info versi dari GitHub\n"})
+        ui_queue.put({"type": "log", "text": f"Versi Terbaru   : Gagal mengambil info versi dari GitHub ({channel_title})\n"})
 
     if local_ver and latest_ver and local_ver == latest_ver:
         ui_queue.put({"type": "progress", "value": 1.0, "text": "Progress: Selesai"})
-        ui_queue.put({"type": "log", "text": f"\n[INFO] yt-dlp sudah menggunakan versi terbaru (v{local_ver}). Tidak perlu di-update.\n"})
+        ui_queue.put({"type": "log", "text": f"\n[INFO] yt-dlp sudah menggunakan versi terbaru (v{local_ver}) untuk channel {channel_title}.\n"})
         ui_queue.put({"type": "log", "text": "=================================\n"})
         return
 
     if local_ver and latest_ver:
-        ui_queue.put({"type": "log", "text": f"\nMemulai pembaruan: v{local_ver} -> v{latest_ver}...\n"})
+        ui_queue.put({"type": "log", "text": f"\nMemulai pembaruan ({channel_title}): v{local_ver} -> v{latest_ver}...\n"})
     else:
-        ui_queue.put({"type": "log", "text": "\nMemulai pengunduhan yt-dlp...\n"})
+        ui_queue.put({"type": "log", "text": f"\nMemulai pengunduhan yt-dlp ({channel_title})...\n"})
 
-    url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
     temp_path = YT_DLP_PATH + ".new"
     
     try:
@@ -893,7 +919,7 @@ def update_ytdlp_logic():
                 pass
             
         final_ver = get_local_ytdlp_version() or latest_ver or "Terbaru"
-        ui_queue.put({"type": "log", "text": f"\n--- UPDATE BERHASIL! (yt-dlp diperbarui ke v{final_ver}) ---\n"})
+        ui_queue.put({"type": "log", "text": f"\n--- UPDATE BERHASIL! (yt-dlp diperbarui ke v{final_ver} [{channel_title}]) ---\n"})
     except Exception as e:
         ui_queue.put({"type": "log", "text": f"ERROR saat update: {e}\n"})
         if os.path.exists(temp_path):

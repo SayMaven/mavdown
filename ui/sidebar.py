@@ -66,9 +66,10 @@ def build_sidebar(app, parent):
 
     app.nav_btns = {}
     nav_items = [
-        ("studio", "Studio Unduh", app.show_studio_view),
-        ("queue",  "Antrean Batch", app.show_queue_view),
-        ("log",    "Konsol Log",   app.show_log_view),
+        ("studio",   "Studio Unduh",  app.show_studio_view),
+        ("queue",    "Antrean Batch", app.show_queue_view),
+        ("log",      "Konsol Log",    app.show_log_view),
+        ("settings", "Pengaturan",    app.show_settings_view),
     ]
     for key, text, cmd in nav_items:
         btn = ctk.CTkButton(
@@ -104,6 +105,12 @@ def build_sidebar(app, parent):
             height=32, corner_radius=6, font=ctk.CTkFont(size=11), anchor="w",
             fg_color=fc, hover_color=hc, text_color="#F3F4F6"
         ).pack(fill="x", pady=2)
+
+    ctk.CTkLabel(
+        sb_inner, text="Preset mengatur format, codec, dan resolusi secara otomatis.",
+        font=ctk.CTkFont(size=9), text_color=THEME["text_dim"],
+        wraplength=220, justify="left"
+    ).pack(anchor="w", pady=(6, 0))
 
     # ── Bottom System Status Card ─────────────────────────────────────
     sys_box = ctk.CTkFrame(sb_inner, fg_color="#131522", corner_radius=10)
@@ -142,12 +149,6 @@ def build_sidebar(app, parent):
         height=30, corner_radius=6, font=ctk.CTkFont(size=11, weight="bold"),
         fg_color=THEME["accent_amber"], hover_color=THEME["accent_amber_hover"], text_color="#FFFFFF"
     )
-    app.update_btn.pack(fill="x", pady=(0, 6))
-
-    ctk.CTkButton(
-        s_in, text="Pengaturan Lengkap", command=app.open_settings,
-        height=28, corner_radius=6, font=ctk.CTkFont(size=11),
-        fg_color="transparent", hover_color="#1E2235", text_color=THEME["text_muted"]
-    ).pack(fill="x")
+    app.update_btn.pack(fill="x")
 
     return sidebar
