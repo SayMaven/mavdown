@@ -1,4 +1,5 @@
 import os
+import time
 import unittest
 import tempfile
 import json
@@ -105,6 +106,10 @@ class TestMavdownCore(unittest.TestCase):
             tmp_file = os.path.join(temp_dir, "test.mp4.tmp")
             with open(tmp_file, "w") as f:
                 f.write("dummy")
+
+            # Set mtime ke masa lalu agar terjamin kadaluarsa di semua filesystem
+            old_time = time.time() - 60
+            os.utime(tmp_file, (old_time, old_time))
 
             # max_age_seconds=0 agar langsung dibersihkan
             cleaned = cleanup_orphaned_temp_files(temp_dir, max_age_seconds=0)

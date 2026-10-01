@@ -2,139 +2,177 @@
 
 ![Maven Downloader Screenshot](https://res.cloudinary.com/ds4a54vuy/image/upload/v1790796075/Screenshot_mavdown_1_2.png)
 
-**Maven Downloader (Mavdown)** adalah aplikasi desktop modern berbasis Python & CustomTkinter yang dirancang untuk mengunduh media (video, album slide foto, dan audio) dari berbagai platform global dengan kecepatan maksimal dan arsitektur *Multi-Tier Engine*.
+**Maven Downloader (Mavdown)** is a modern desktop media downloader built on Python and CustomTkinter, designed to extract and download media (videos, photo slide albums, and audio) from dozens of global platforms with maximum speed and an advanced Multi-Tier Engine architecture.
 
-Aplikasi ini menggabungkan **Tier 1 Fast REST Scraping Engine** (ekstraksi instan < 1 detik tanpa watermark untuk Douyin, TikTok, Instagram, Twitter/X, Pinterest, Facebook, dan Bilibili) dengan **Tier 2 Fallback Engine** (`yt-dlp` + `aria2c` multi-connection 16x speed + `ffmpeg` + `node.js` anti-bot solver).
+The application pairs a **Tier 1 Fast REST Scraping Engine** (near-instant media extraction without watermarks for Douyin, TikTok, Instagram, Twitter/X, Pinterest, Facebook, and Bilibili) with a **Tier 2 Fallback Engine** (yt-dlp, aria2c 16x multi-connection acceleration, FFmpeg, and Node.js anti-bot solver), backed by a local visual download history library with on-disk thumbnail caching and secure user data isolation.
 
 ---
 
-## 🚀 Fitur Unggulan
+## Key Features
 
 ### 1. Multi-Tier Engine Architecture
-- **Tier 1 (Fast REST Engines)**: Mengunduh langsung melalui endpoint API & mirror scraper tanpa membebani CPU. Mendukung video HD murni tanpa watermark dan album slide multi-foto.
-- **Tier 2 (Enterprise Fallback)**: Didukung oleh `yt-dlp` terbaru yang terintegrasi dengan JavaScript runtime (`node.exe`) untuk menembus proteksi enkripsi YouTube terbaru (Anti 403 Forbidden).
-- **Akselerasi Unduhan**: Dukungan opsi `aria2c` dengan 16 thread paralel untuk memaksimalkan bandwidth internet Anda.
+- **Tier 1 (Fast REST Engines)**: Connects directly through lightweight API endpoints and mirror scrapers without CPU overhead, producing pure watermark-free HD video streams and master-resolution photo slide albums.
+- **Tier 2 (Enterprise Fallback)**: Powered by the latest yt-dlp engine paired with an internal Node.js JavaScript runtime to solve YouTube cipher challenges (Anti-403 Forbidden).
+- **Multi-Thread Acceleration**: Native support for aria2c utilizing up to 16 concurrent connections to saturate high-speed network connections.
 
-### 2. Platform Media yang Didukung Lengkap
+### 2. Comprehensive Platform Support
 - **Douyin**: 
-  - Mendukung video resolusi hingga 4K/1080p FHD dan Album Slide Foto HD.
-  - Ekstraksi musik BGM otomatis.
-  - **Auto-Isolate Share URL**: Otomatis membersihkan teks awalan dan akhiran bahasa Mandarin/token saat menekan tombol **Tempel** maupun menggunakan shortcut **`Ctrl+V`**.
-  - Deep Probe resolusi, FPS, durasi, dan codec via ffprobe.
+  - Supports video downloads up to 4K / 1080p FHD and master-quality HD Photo Slide Albums.
+  - Automatic background music (BGM) extraction.
+  - Automatic URL sanitization: extracts and isolates clean URLs from promotional Chinese share text and token strings via both the Paste button and the Ctrl+V keyboard shortcut.
+  - Deep probing of stream resolution, FPS, duration, and codec via ffprobe.
 - **TikTok**:
-  - Unduh Video HD tanpa watermark dan Slide Foto HD asli + Musik BGM (`.mp3`).
+  - Watermark-free HD video downloads and automatic sorting of full-resolution photo albums into dedicated folders tagged with `[TikTok Slide]`, alongside original MP3 audio.
 - **Instagram**:
-  - Mendukung Reels, Video post, dan **Carousel Slide Album** (ekstraksi seluruh foto potret/HD ke dalam folder khusus).
+  - Downloads Reels, regular video posts, and multi-photo Carousel Albums directly into organized directories.
 - **Twitter / X**:
-  - Unduh video HD berbagai bitrate dan album multi-foto.
+  - Multi-bitrate HD video stream selection and original-resolution photo album downloads.
 - **Pinterest**:
-  - Unduh video MP4 jernih dan foto Pin resolusi original (mode slide parameter adaptif).
+  - Pristine MP4 video downloads and automatic upscaling of image Pins to original master resolution (`/originals/`) with adaptive parameter controls.
 - **Bilibili**:
-  - Parser multi-kualitas dengan mitigasi proteksi rate-limit CDN Akamai (auto-cap 720p jika tanpa akun login untuk mencegah *broken connection*).
+  - Multi-resolution stream extraction with automated Akamai CDN rate-limit mitigations (Error 492) to prevent mid-stream connection drops.
 - **YouTube**:
-  - Dukungan resolusi hingga 4K UHD 60FPS HDR, filter codec selektif (H.264, VP9, AV1), ekstraksi MP3/M4A, embed subtitle (Softsub P0), serta injeksi thumbnail cover art dan metadata ID3.
-- **Platform Lain**: SoundCloud, Facebook, Vimeo, Twitch, Reddit, Dailymotion, NicoNico, dan ribuan situs yang didukung yt-dlp.
+  - Support for resolutions up to 4K UHD 60FPS HDR, selective codec filtering (H.264, VP9, AV1), MP3/M4A high-fidelity audio extraction, soft-subtitle embedding, and automated ID3 metadata/cover art injection.
+- **Other Platforms**: SoundCloud, Facebook, Vimeo, Twitch, Reddit, Dailymotion, NicoNico, and thousands of platforms supported across the yt-dlp ecosystem.
 
-### 3. Antarmuka Modern & Cerdas (Studio Mode)
-- **Desain Futuristik Dark Mode**: Dibangun menggunakan CustomTkinter dengan palet warna modern, badge platform dinamis, dan responsif.
-- **Pembersihan URL & Auto-Preview**:
-  - Tempel link langsung mengisolasi URL murni dari teks pengantar/caption.
-  - Menekan tombol **Tempel** atau **`Ctrl+V`** seketika menjalankan inspeksi pratinjau info, thumbnail, dan metadata teknis.
-- **Adaptif Studio Parameter**:
-  - Beralih otomatis antara **Mode Video + Audio** dan **Mode Slide Foto** saat mendeteksi album foto (Instagram Carousel, Douyin Note, TikTok Photo).
-- **Antrean Batch (Batch Queue)**:
-  - Masukkan daftar banyak URL atau impor file teks `.txt` untuk mengunduh puluhan media sekaligus secara berurutan.
-- **Preset Cepat**:
-  - Akses satu klik untuk profil favorit: *Super Quality*, *Musik MP3*, *Hemat Data (H.264 720p)*, dan *Podcast*.
-- **Injeksi Thumbnail & Metadata**:
-  - Opsi menanamkan cover art asli dan metadata (Judul, Kreator, Tanggal) ke dalam berkas media `.mp4`, `.mkv`, `.mp3`, `.m4a`.
-- **Tab Pengaturan Terpadu (Inline Settings View)**:
-  - Tab navigasi pengaturan lengkap tanpa popup terpisah.
-  - **ThemedDropdown**: Dropdown dark-mode kustom dengan pembatas tegas, kontras warna rapi, dan popup menu sinkron tanpa border putih OS bawaan.
-  - **Impor Cookie Browser**: Bypass login dan anti-bot dengan cookie otomatis dari Chrome, Firefox, Edge, Brave, Opera, atau Vivaldi.
-  - **Pembaruan Engine yt-dlp Multi-Channel**: Dukungan pembaruan channel **Versi Stable** (rilis berkala teruji) dan **Versi Nightly** (build harian otomatis terbaru dari upstream).
-  - **Reset Preferensi Pabrik**: Mengembalikan seluruh konfigurasi format/codec/opsi ke nilai default dengan satu klik.
+### 3. Download History Library
+- **Visual Thumbnail Previews**:
+  - Dedicated 16:9 preview containers (118x70 px) with smooth rounded corners for every history card.
+  - Automatic media extractors: video frames are grabbed from the 1st second via FFmpeg, photos/slides are rendered via PIL, and online thumbnails are cached locally inside the user directory.
+  - Interactive preview: clicking any thumbnail directly opens or plays the media file in the operating system's default media player.
+- **Comprehensive Technical Metadata Chips**:
+  - Platform Badges with tailored color identities (YouTube, TikTok, Douyin, Bilibili, Pinterest, Instagram, Twitter/X, Facebook, etc.).
+  - Specific Media Format pills (MP4, MKV, SLIDE, JPG, MP3).
+  - Creator / Artist attribution extracted from platform metadata or embedded tags.
+  - Native Technical Resolution (such as 1080p FHD, 4K UHD, or 736x1308).
+  - Duration or Photo Slide Count.
+  - Actual disk File Size and Download Timestamp.
+- **Context-Aware Action Buttons**:
+  - Open: automatically assigned for Photos and Slide Albums.
+  - Play: automatically assigned for Video and Audio streams.
+  - Folder: reveals the file in Windows File Explorer with the item pre-selected.
+  - Copy Link: copies the original source URL back to the clipboard in a single click.
+  - Delete & Clear History: safe database management backed by thread-safe locking.
+- **Real-Time Search & Filtering**:
+  - Instant filter bar allowing users to search download history dynamically by title, creator, platform, or file format.
+
+### 4. Modern Interface & Studio Mode
+- **Sleek, Native Dark Theme**: Crafted with CustomTkinter featuring curated color palettes and clean typography with zero emoji characters for maximum cross-platform visual consistency.
+- **Auto-Detect & Instant Preview**: Pasting a URL via the Paste button or Ctrl+V automatically cleans the link and triggers instant metadata inspection, duration calculation, and cover art retrieval.
+- **Adaptive Parameter Studio**: The interface automatically toggles between Video + Audio Mode, Audio Only Mode, and Photo / Slide Download Parameters based on the inspected content type.
+- **Quick Presets**: One-click profile switcher: Super Quality, Music MP3, Data Saver (720p H.264), and Podcast.
+- **Metadata & Cover Art Injection**: Direct embedding of high-resolution cover art and metadata (Title, Artist, Date) into MP4, MKV, MP3, and M4A containers via FFmpeg stream disposition.
+- **Batch Queue Management**: Queue multiple URLs simultaneously or import batch text files (`.txt`) for automated sequential downloads.
+- **Real-Time Telemetry & Log Console**: Live progress bars, transfer speed metrics, ETA calculations, and a detailed diagnostic log console.
+
+### 5. Unified Settings, Networking & Background Utilities
+- **Integrated Settings View**: Replaced legacy popup dialogs with a full navigation tab within the main workspace.
+- **Custom ThemedDropdown**: Bespoke dark-mode dropdown menus featuring crisp borders, sharp contrast, and OS-borderless popups.
+- **Network Proxy Support**: Built-in proxy configuration (HTTP, HTTPS, SOCKS5) to facilitate downloads in restricted environments or bypass regional ISP throttling.
+- **Background Clipboard Monitor Daemon**: Lightweight background daemon that automatically detects copied media URLs, pastes them into the input bar, and triggers info inspection without manual intervention.
+- **Browser Cookie Session Importer**: Direct cookie extraction from Chrome, Firefox, Edge, Brave, Opera, or Vivaldi to download private media or bypass platform bot verification.
+- **Multi-Channel yt-dlp Updater**: Switch between Stable Channel (tested, scheduled releases) and Nightly Channel (daily upstream builds to counter sudden platform API changes).
+- **Preferences Reset**: One-click factory reset button to restore default format, codec, and resolution configurations.
+
+### 6. Storage Architecture & System Security
+- **User Data Isolation (%LOCALAPPDATA%)**:
+  - Configuration files (`config.json`), history database (`history.json`), and thumbnail caches are strictly stored in the user data directory (`%LOCALAPPDATA%\SayMaven\Mavdown\`).
+  - Guarantees full read/write permissions without ever triggering Windows User Account Control (UAC) administrator prompts, even when installed in protected directories like `C:\Program Files`.
+  - Ensures preferences and download histories persist untouched across updates and reinstallations.
+- **Automatic Migration**: Automatically detects and migrates legacy configurations from the portable application folder to the user data directory.
 
 ---
 
-## 📁 Struktur Direktori
+## Directory Structure
 
 ```text
 mavdown/
-├── assets/           # Ikon aplikasi dan aset grafis
-│   └── old/          # Arsip aset terdahulu
-├── bin/              # Pustaka biner mandiri (yt-dlp.exe, aria2c.exe, ffmpeg.exe, ffprobe.exe, node.exe)
-├── dist/             # (Otomatis) Hasil rilis kompilasi Nuitka
-├── downloads/        # Folder bawaan hasil unduhan media
-├── engines/          # Arsitektur Fast Tier 1 Engines
-│   ├── base.py       # Utilitas stream download, ffprobe probe, embed thumbnail, remux
-│   ├── router.py     # Router pendeteksi platform & dispatcher cerdas
-│   ├── douyin.py     # Engine Douyin (UHD SnapDouyin, Cloud API, Aweme)
-│   ├── tiktok.py     # Engine TikTok (TikWM, MusicalDown, Lovetik)
-│   ├── instagram.py  # Engine Instagram (Reels, Post, Multi-photo Carousel)
-│   ├── twitter.py    # Engine Twitter/X (Twitsave, API)
-│   ├── pinterest.py  # Engine Pinterest (Scraper HD Originals & MP4 video)
-│   ├── bilibili.py   # Engine Bilibili (Stream parser & CDN safety)
-│   └── facebook.py   # Engine Facebook video
-├── ui/               # Arsitektur antarmuka modular
-│   ├── app.py        # Controller utama GUI, event binding, UI queue worker
-│   ├── constants.py  # Palet tema, konfigurasi preset, pola platform regex
-│   ├── sidebar.py    # Komponen navigasi sidebar, quick presets, dan mini status
-│   ├── studio_view.py# Panel utama studio inspeksi & konfigurasi download
-│   ├── queue_view.py # Panel antrean download batch & impor file URL
-│   ├── log_view.py   # Panel konsol log aktivitas real-time
-│   ├── settings_view.py # Panel inline pengaturan direktori, cookie, & update engine
-│   └── widgets.py    # Komponen UI modern kustom (ThemedDropdown)
-├── config.py         # Manajer konfigurasi path, preferensi, & pembaca config.json
-├── config.json       # (Otomatis) Preferensi folder, channel update, dan cookies tersimpan
-├── downloader.py     # Core controller unduhan, orchestrator yt-dlp, dan lirik konverter
-├── gui.py            # Gateway backward-compatibility untuk modul UI
-├── mavdown.py        # Titik masuk utama aplikasi (Entry Point)
-├── requirements.txt  # Daftar dependensi pustaka Python
-├── .gitignore        # Berkas pengecualian Git
-└── LICENSE           # Lisensi MIT
+├── .github/
+│   └── workflows/ci.yml # Automated GitHub Actions CI workflow
+├── assets/              # Application icons and branding graphics
+│   └── old/             # Archived legacy assets
+├── bin/                 # Self-contained binaries (yt-dlp.exe, aria2c.exe, ffmpeg.exe, ffprobe.exe, node.exe)
+├── downloads/           # Default fallback media downloads directory
+├── engines/             # Fast Tier 1 Scraping Engines
+│   ├── base.py          # Stream download utilities, ffprobe probing, thumbnail embedding, remuxing
+│   ├── router.py        # Platform detection router & intelligent engine dispatcher
+│   ├── douyin.py        # Douyin engine (SnapDouyin UHD, Cloud API, Aweme)
+│   ├── tiktok.py        # TikTok engine (TikWM, MusicalDown, Lovetik)
+│   ├── instagram.py     # Instagram engine (Reels, Posts, Multi-photo Carousels)
+│   ├── twitter.py       # Twitter/X engine (Twitsave, REST API)
+│   ├── pinterest.py     # Pinterest engine (HD Originals scraper & MP4 videos)
+│   ├── bilibili.py      # Bilibili engine (Stream parser & CDN safety)
+│   └── facebook.py      # Facebook engine (Public & SD/HD video parser)
+├── tests/               # Automated unit test suite
+│   ├── __init__.py      # Test package initialization
+│   └── test_core.py     # Unit tests (platform router, sanitizer, formatters, history CRUD, temp cleaner)
+├── ui/                  # Modular CustomTkinter user interface architecture
+│   ├── app.py           # Main GUI controller, event bindings, UI queue processor
+│   ├── constants.py     # Color palettes, quick preset configs, platform regex patterns
+│   ├── sidebar.py       # Sidebar navigation, quick preset switcher, and status telemetry
+│   ├── studio_view.py   # Main media inspection studio & download parameter panel
+│   ├── queue_view.py    # Batch download queue & text file URL importer
+│   ├── history_view.py  # Visual download library with thumbnail previews & live search
+│   ├── log_view.py      # Real-time streaming diagnostic log console
+│   ├── settings_view.py # Inline settings panel for directories, proxies, cookies, & updates
+│   └── widgets.py       # Custom modern UI widgets (ThemedDropdown)
+├── config.py            # Path resolution manager, preferences handler, & AppData isolation
+├── config.json          # (Generated) User preferences, update channels, and active cookies
+├── downloader.py        # Core download orchestrator, yt-dlp argument builder, & lyric converter
+├── gui.py               # Backward-compatibility gateway exporting the App controller
+├── history.py           # Thread-safe download history manager, thumbnail caching, & auto-healing
+├── mavdown.py           # Primary application entry point
+├── requirements.txt     # Python dependency specifications
+├── AGENTS.md            # Technical engineering architecture & developer guidelines
+├── .gitignore           # Git ignore specifications
+└── LICENSE              # MIT License
 ```
 
 ---
 
-## 🛠️ Panduan Menjalankan dari Kode Sumber
+## Automated Testing & CI
 
-### 1. Prasyarat Sistem
-- **Sistem Operasi**: Windows 10 atau Windows 11 (64-bit direkomendasikan).
-- **Python**: Versi 3.10 atau yang lebih baru.
+This repository includes an automated unit test suite to verify core module stability and regression prevention:
 
-### 2. Instalasi Dependensi
-Clone repositori ini dan instal dependensi pustaka Python:
+```bash
+# Execute the full unit test suite
+python -m unittest discover tests
+
+# Verify Python bytecode compilation across all modules
+python -c "import compileall; compileall.compile_dir('.', quiet=1)"
+```
+
+The GitHub Actions CI workflow (`.github/workflows/ci.yml`) automatically executes bytecode verification and the unit test suite on every push and pull request across Windows Server virtual environments.
+
+---
+
+## Building from Source
+
+### 1. Prerequisites
+- **Operating System**: Windows 10 or Windows 11 (64-bit recommended).
+- **Python**: Version 3.10 or higher.
+
+### 2. Dependency Installation
+Clone this repository and install the Python dependencies:
 ```bash
 git clone https://github.com/SayMaven/mavdown.git
 cd mavdown
 pip install -r requirements.txt
 ```
 
-### 3. Komponen Biner Tambahan (Folder `bin/`)
-Pastikan file biner berikut tersedia di dalam folder `bin/` untuk mengaktifkan seluruh fitur:
-- `yt-dlp.exe` (Engine unduhan utama)
-- `ffmpeg.exe` & `ffprobe.exe` (Pemrosesan media, probe codec, injeksi thumbnail)
-- `aria2c.exe` (Akselerasi download multi-thread)
-- `node.exe` (JavaScript runtime untuk pemecahan cipher YouTube)
+### 3. Binary Dependencies (`bin/` Directory)
+Ensure the following binaries are placed inside the `bin/` directory:
+- `yt-dlp.exe` (Primary fallback download engine)
+- `ffmpeg.exe` & `ffprobe.exe` (Media processing, codec probing, and cover art injection)
+- `aria2c.exe` (Multi-connection download acceleration)
+- `node.exe` (JavaScript runtime for YouTube cipher decryption)
 
-### 4. Jalankan Aplikasi
+### 4. Running the Application
 ```bash
 python mavdown.py
 ```
 
 ---
 
-## ⚙️ Kompilasi ke Executable (.exe)
-
-Proyek ini telah dikonfigurasi untuk dikompilasi secara mandiri menggunakan **Nuitka** agar menghasilkan performa tinggi tanpa dependensi Python di komputer pengguna:
-
-```bash
-pip install nuitka
-python -m nuitka --standalone --windows-disable-console --enable-plugin=tk-inter --include-data-dir=assets=assets --include-data-dir=bin=bin --output-dir=dist mavdown.py
-```
-
----
-
-## 📄 Lisensi
-Proyek ini dilisensikan di bawah lisensi [MIT License](LICENSE). Bebas digunakan, dimodifikasi, dan didistribusikan untuk keperluan personal maupun edukasi.
+## License
+This project is licensed under the [MIT License](LICENSE). You are free to use, modify, and distribute it for personal and educational purposes.

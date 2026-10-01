@@ -719,7 +719,7 @@ def cleanup_orphaned_temp_files(output_dir: str, max_age_seconds: int = 600) -> 
                 try:
                     if os.path.isfile(fpath):
                         mtime = os.path.getmtime(fpath)
-                        if now - mtime > max_age_seconds:
+                        if max_age_seconds <= 0 or (now - mtime) >= max_age_seconds:
                             os.remove(fpath)
                             removed += 1
                 except Exception:
