@@ -6,8 +6,10 @@ from config import (
     BASE_DIR, DEFAULT_OUTPUT_DIR, save_config, save_preferences,
     is_aria2_available, save_ytdlp_channel, load_ytdlp_channel,
     save_proxy, load_proxy, save_clipboard_monitor, load_clipboard_monitor,
-    save_organize_by_platform, load_organize_by_platform
+    save_organize_by_platform, load_organize_by_platform,
+    save_pixiv_session, load_pixiv_session
 )
+from engines.pixiv import verify_pixiv_session, login_pixiv_via_browser
 from downloader import get_local_ytdlp_version
 from ui.widgets import ThemedDropdown
 from ui.constants import APP_VERSION, THEME
@@ -192,6 +194,83 @@ def build_settings_view(app, parent):
         font=ctk.CTkFont(size=11, weight="bold"),
         command=_on_save_proxy
     ).pack(side="left")
+
+    # ══ SECTION 2D: SESI AKUN PIXIV (RESTRICTED & R-18) ══════════════
+    app.sec_pixiv = ctk.CTkFrame(sv_scroll, fg_color=THEME["card_inner"], corner_radius=10)
+    app.sec_pixiv.pack(fill="x", pady=(0, 10))
+    s_pix_in = ctk.CTkFrame(app.sec_pixiv, fg_color="transparent")
+    s_pix_in.pack(fill="x", padx=14, pady=12)
+
+    ctk.CTkLabel(
+        s_pix_in, text="SESI AKUN PIXIV (AKSES KONTEN RESTRICTED & R-18)",
+        font=ctk.CTkFont(size=10, weight="bold"), text_color=THEME["text_dim"]
+    ).pack(anchor="w", pady=(0, 6))
+
+    pix_row = ctk.CTkFrame(s_pix_in, fg_color="transparent")
+    pix_row.pack(fill="x", pady=(0, 6))
+
+    app.settings_pixiv_entry = ctk.CTkEntry(
+        pix_row, textvariable=app.pixiv_session_var, placeholder_text="Tempel nilai cookie PHPSESSID Pixiv di sini...",
+        height=36, corner_radius=8, show="*",
+        border_color=THEME["border_light"], fg_color="#0A0B12", text_color=THEME["text_body"],
+        font=ctk.CTkFont(size=11)
+    )
+    app.settings_pixiv_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+    def _toggle_pixiv_mask():
+        if app.settings_pixiv_entry.cget("show") == "*":
+            app.settings_pixiv_entry.configure(show="")
+            pix_show_btn.configure(text="Sembunyikan")
+        else:
+            app.settings_pixiv_entry.configure(show="*")
+            pix_show_btn.configure(text="Lihat")
+
+    pix_show_btn = ctk.CTkButton(
+        pix_row, text="Lihat", width=64, height=36, corner_radius=8,
+        fg_color="#1E2032", hover_color="#2B2E45", font=ctk.CTkFont(size=11),
+        command=_toggle_pixiv_mask
+    )
+    pix_show_btn.pack(side="left", padx=(0, 6))
+
+    app.pixiv_save_btn = ctk.CTkButton(
+        pix_row, text="Simpan & Cek", width=100, height=36, corner_radius=8,
+        fg_color=THEME["accent_indigo"], hover_color=THEME["accent_indigo_hover"],
+        font=ctk.CTkFont(size=11, weight="bold"),
+        command=lambda: _on_save_pixiv_session(app)
+    )
+    app.pixiv_save_btn.pack(side="left", padx=(0, 6))
+
+    app.pixiv_login_btn = ctk.CTkButton(
+        pix_row, text="Login Browser", width=110, height=36, corner_radius=8,
+        fg_color=THEME["accent_emerald"], hover_color=THEME["accent_emerald_hover"],
+        font=ctk.CTkFont(size=11, weight="bold"),
+        command=lambda: _on_browser_login_pixiv(app)
+    )
+    app.pixiv_login_btn.pack(side="left", padx=(0, 6))
+
+    ctk.CTkButton(
+        pix_row, text="Hapus", width=60, height=36, corner_radius=8,
+        fg_color="#27131B", hover_color="#451824", text_color="#F87171",
+        font=ctk.CTkFont(size=11, weight="bold"),
+        command=lambda: _on_clear_pixiv_session(app)
+    ).pack(side="left")
+
+    init_status = "Status: Sesi Tersimpan" if app.pixiv_session_var.get() else "Status: Belum Terhubung (Sesi Kosong)"
+    init_color = THEME["accent_emerald"] if app.pixiv_session_var.get() else THEME["text_dim"]
+    app.pixiv_status_label = ctk.CTkLabel(
+        s_pix_in,
+        text=init_status,
+        font=ctk.CTkFont(size=10, weight="bold"),
+        text_color=init_color,
+        anchor="w", justify="left"
+    )
+    app.pixiv_status_label.pack(anchor="w", pady=(2, 4))
+
+    ctk.CTkLabel(
+        s_pix_in,
+        text="Diperlukan untuk membuka karya R-18, R-18G, atau members-only. Anda dapat mengklik tombol 'Login Browser' untuk masuk secara langsung via browser Mavdown, atau menempelkan nilai PHPSESSID secara manual. Sesi disimpan secara lokal tanpa menyimpan email atau kata sandi.",
+        font=ctk.CTkFont(size=10), text_color=THEME["text_dim"], wraplength=600, justify="left"
+    ).pack(anchor="w", pady=(0, 0))
 
     # ══ SECTION 3: RESET PREFERENCES ══════════════════════════════════
     sec3 = ctk.CTkFrame(sv_scroll, fg_color=THEME["card_inner"], corner_radius=10)
@@ -436,6 +515,89 @@ def _on_organize_platform_toggle(app):
     save_organize_by_platform(val)
     msg = "Pengelompokan folder per layanan diaktifkan." if val else "Pengelompokan folder per layanan dinonaktifkan."
     app.show_toast(msg, "info")
+
+
+def _on_save_pixiv_session(app):
+    """Handler simpan dan verifikasi sesi Pixiv."""
+    session_val = app.pixiv_session_var.get().strip()
+    if not session_val:
+        app.show_toast("Sesi Pixiv tidak boleh kosong.", "warning")
+        return
+
+    app.pixiv_save_btn.configure(state="disabled", text="Memeriksa...")
+    app.pixiv_status_label.configure(text="Status: Memverifikasi sesi...", text_color=THEME["text_muted"])
+
+    def _verify_thread():
+        is_valid, user_info = verify_pixiv_session(session_val)
+        def _update_ui():
+            app.pixiv_save_btn.configure(state="normal", text="Simpan & Cek")
+            if is_valid:
+                save_pixiv_session(session_val)
+                app.pixiv_status_label.configure(
+                    text=f"Status: Terhubung ({user_info})",
+                    text_color=THEME["accent_emerald"]
+                )
+                app.show_toast(f"Sesi Pixiv berhasil terhubung: {user_info}", "success")
+            else:
+                app.pixiv_status_label.configure(
+                    text=f"Status: {user_info}",
+                    text_color="#EF4444"
+                )
+                app.show_toast("Sesi Pixiv tidak valid atau kadaluarsa.", "error")
+
+        app.after(0, _update_ui)
+
+    import threading
+    threading.Thread(target=_verify_thread, daemon=True).start()
+
+
+def _on_browser_login_pixiv(app):
+    """Handler login Pixiv interaktif via browser isolated Mavdown."""
+    import threading
+
+    app.pixiv_login_btn.configure(state="disabled", text="Membuka Browser...")
+    app.pixiv_status_label.configure(
+        text="Status: Membuka jendela login browser...",
+        text_color=THEME["text_muted"]
+    )
+
+    def _status_update(msg: str):
+        def _update():
+            app.pixiv_status_label.configure(text=f"Status: {msg}", text_color=THEME["text_muted"])
+            if "login" in msg.lower() and "terdeteksi" not in msg.lower():
+                app.pixiv_login_btn.configure(text="Menunggu Login...")
+        app.after(0, _update)
+
+    def _worker():
+        ok, result = login_pixiv_via_browser(status_callback=_status_update)
+
+        def _on_finish():
+            app.pixiv_login_btn.configure(state="normal", text="Login Browser")
+            if ok:
+                app.pixiv_session_var.set(result)
+                app.show_toast("Login berhasil! Memverifikasi sesi...", "info")
+                _on_save_pixiv_session(app)
+            else:
+                app.pixiv_status_label.configure(
+                    text=f"Status: {result}",
+                    text_color="#EF4444"
+                )
+                app.show_toast(result, "warning")
+
+        app.after(0, _on_finish)
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def _on_clear_pixiv_session(app):
+    """Handler hapus sesi Pixiv tersimpan."""
+    app.pixiv_session_var.set("")
+    save_pixiv_session("")
+    app.pixiv_status_label.configure(
+        text="Status: Belum Terhubung (Sesi Kosong)",
+        text_color=THEME["text_dim"]
+    )
+    app.show_toast("Sesi Pixiv berhasil dihapus.", "info")
 
 
 def _reset_prefs(app):

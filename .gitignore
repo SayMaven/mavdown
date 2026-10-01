@@ -31,3 +31,5 @@ build_nuitka.bat
 
 # AI Agent Documentation
 AGENTS.md
+
+docs/

@@ -13,7 +13,7 @@ import html
 from config import (
     YT_DLP_PATH, ARIA2_PATH, FFMPEG_PATH, NODE_PATH,
     DEFAULT_OUTPUT_DIR, load_proxy, load_organize_by_platform,
-    get_ytdlp_update_dest, refresh_binary_paths
+    get_ytdlp_update_dest, refresh_binary_paths, load_pixiv_session
 )
 from engines import (
     resolve_fast_info, dispatch_fast_download, detect_platform,
@@ -189,6 +189,7 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
                 'view_count': fast_info.get('view_count', 0),
                 'like_count': fast_info.get('like_count', 0),
                 'is_slide': fast_info.get('is_slide', False),
+                'is_ugoira': fast_info.get('is_ugoira', False),
                 'slide_count': fast_info.get('slide_count', 0),
                 'has_audio': fast_info.get('has_audio', False),
                 'platform': fast_info.get('platform', 'Fast Engine'),
@@ -202,16 +203,36 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
             if thumb_url and thumb_url.startswith('http'):
                 clean_thumb = html.unescape(thumb_url)
                 try:
-                    is_fb = ('facebook' in clean_thumb or 'fbcdn' in clean_thumb or 'fbsbx' in clean_thumb or fast_info.get('platform') == 'Facebook')
+                    platform_name = str(fast_info.get('platform', '')).lower()
+                    is_fb = ('facebook' in clean_thumb or 'fbcdn' in clean_thumb or 'fbsbx' in clean_thumb or platform_name == 'facebook')
+                    is_pixiv = ('pixiv' in clean_thumb or 'pximg' in clean_thumb or platform_name == 'pixiv')
+                    is_douyin = ('douyin' in clean_thumb or platform_name == 'douyin')
+                    is_bilibili = ('bilibili' in clean_thumb or 'hdslb' in clean_thumb or platform_name == 'bilibili')
+
                     headers = {
-                        'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)' if is_fb else 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                        'Referer': 'https://www.douyin.com/' if 'douyin' in clean_thumb else ''
+                        'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)' if is_fb else 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+                        'Referer': ''
                     }
-                    r_thumb = requests.get(clean_thumb, headers=headers, timeout=8)
+
+                    if is_pixiv:
+                        headers['Referer'] = 'https://www.pixiv.net/'
+                        px_sess = load_pixiv_session()
+                        if px_sess:
+                            headers['Cookie'] = f"PHPSESSID={px_sess.strip()}"
+                    elif is_douyin:
+                        headers['Referer'] = 'https://www.douyin.com/'
+                    elif is_bilibili:
+                        headers['Referer'] = 'https://www.bilibili.com/'
+
+                    r_thumb = requests.get(clean_thumb, headers=headers, timeout=10)
                     if r_thumb.status_code == 200 and len(r_thumb.content) > 100:
                         ui_queue.put({"type": "info_thumb_data", "image_data": r_thumb.content})
+                    else:
+                        ui_queue.put({"type": "info_thumb", "text": "Pratinjau media tidak tersedia.", "image": None})
                 except Exception:
-                    pass
+                    ui_queue.put({"type": "info_thumb", "text": "Gagal memuat pratinjau thumbnail.", "image": None})
+            else:
+                ui_queue.put({"type": "info_thumb", "text": "Pratinjau media tidak tersedia.", "image": None})
             return
     except Exception:
         pass
@@ -555,7 +576,7 @@ def process_downloaded_subtitles(output_dir: str, download_start_time: float, is
     except Exception as e:
         print(f"Error in process_downloaded_subtitles: {e}")
 
-def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container, download_subs, embed_subs, subs_lang, embed_thumb, use_aria2, download_playlist, custom_path, custom_cmd, browser_cookie="Tidak Ada", share_text=None):
+def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container, download_subs, embed_subs, subs_lang, embed_thumb, use_aria2, download_playlist, custom_path, custom_cmd, browser_cookie="Tidak Ada", share_text=None, ugoira_format="mp4"):
     global current_process
     base_output_dir = custom_path if custom_path else DEFAULT_OUTPUT_DIR
     
@@ -584,7 +605,8 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
             'audio_codec': acodec,
             'container': container,
             'embed_thumb': embed_thumb,
-            'share_text': share_text
+            'share_text': share_text,
+            'ugoira_format': ugoira_format
         }
         try:
             fast_success = dispatch_fast_download(

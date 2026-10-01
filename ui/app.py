@@ -14,12 +14,14 @@ from config import (
     load_browser_cookie, load_preferences, save_preferences, is_aria2_available,
     load_ytdlp_channel, save_ytdlp_channel, load_proxy, save_proxy,
     load_clipboard_monitor, save_clipboard_monitor,
-    load_organize_by_platform, save_organize_by_platform
+    load_organize_by_platform, save_organize_by_platform,
+    load_pixiv_session, save_pixiv_session
 )
 from downloader import (
     ui_queue, get_video_info, download_video_logic,
     stop_current_process, update_ytdlp_logic
 )
+from engines.router import detect_platform
 from ui.constants import (
     APP_VERSION, APP_TITLE, THEME, PLATFORM_PATTERNS,
     QUICK_PRESETS, LANG_PRESETS
@@ -68,6 +70,9 @@ class App(ctk.CTk):
         self.proxy_var = ctk.StringVar(value=load_proxy())
         self.clipboard_monitor_var = ctk.BooleanVar(value=load_clipboard_monitor())
         self.organize_by_platform_var = ctk.BooleanVar(value=load_organize_by_platform())
+        self.pixiv_session_var = ctk.StringVar(value=load_pixiv_session())
+        self.ugoira_format_var = ctk.StringVar(value="mp4")
+        self.batch_ugoira_format_var = ctk.StringVar(value="gif")
 
         # ── Runtime State ────────────────────────────────────────────────────
         self.last_video_info: dict = {}
@@ -329,6 +334,12 @@ class App(ctk.CTk):
                     elif msg_type == "info_data":
                         self._on_info_data(msg["data"])
 
+                    elif msg_type == "pixiv_login_required":
+                        self.show_toast("Karya Pixiv memerlukan login (R-18 / Restricted). Mengalihkan ke Pengaturan...", "warning")
+                        self.show_settings_view()
+                        if hasattr(self, 'settings_pixiv_entry'):
+                            self.settings_pixiv_entry.focus()
+
                     elif msg_type == "download_success_meta":
                         try:
                             meta = getattr(self, 'last_video_info', {}) or {}
@@ -457,6 +468,19 @@ class App(ctk.CTk):
     def _on_info_data(self, info: dict):
         self.last_video_info = info
 
+        if info.get('requires_login'):
+            self.title_label.configure(text=info.get('title', 'Karya Pixiv (Perlu Login)'))
+            self.meta_platform.configure(text="Pixiv (Perlu Login)")
+            self.meta_channel.configure(text="Akses Dibatasi")
+            self.meta_duration.configure(text="Login Diperlukan")
+            self.meta_views.configure(text="R-18 / Members-Only")
+            self.meta_likes.configure(text="Sesi Dibutuhkan")
+            self.show_toast("Karya Pixiv ini dibatasi (R-18 / Restricted). Silakan isi sesi login di Pengaturan.", "warning")
+            self.show_settings_view()
+            if hasattr(self, 'settings_pixiv_entry'):
+                self.settings_pixiv_entry.focus()
+            return
+
         webpage_url = info.get('webpage_url', '') or info.get('url', '')
         platform_name = info.get('platform', '')
         platform_text = ""
@@ -483,6 +507,7 @@ class App(ctk.CTk):
                 channel = f"@{at_m.group(1)}"
 
         is_slide = info.get('is_slide', False)
+        is_ugoira = info.get('is_ugoira', False)
         slide_count = info.get('slide_count', 0)
         w = info.get('width')
         h = info.get('height')
@@ -494,12 +519,21 @@ class App(ctk.CTk):
 
         if display_channel:
             self.meta_channel.configure(text=f"Kreator: {display_channel}")
+        elif is_ugoira:
+            self.meta_channel.configure(text="Animasi Pixiv")
         elif is_slide:
             self.meta_channel.configure(text="Album Slide")
         else:
             self.meta_channel.configure(text=f"Media {platform_name or 'Web'}")
 
-        if is_slide:
+        if is_ugoira:
+            self.meta_duration.configure(text="Animasi Ugoira")
+            if w and h:
+                self.meta_views.configure(text=f"Ugoira ({w}x{h})")
+            else:
+                self.meta_views.configure(text="Ugoira Animasi")
+            self.meta_likes.configure(text="Frame Berseri Pixiv")
+        elif is_slide:
             if slide_count == 1:
                 self.meta_duration.configure(text="1 Foto HD")
                 if w and h:
@@ -679,17 +713,14 @@ class App(ctk.CTk):
             ).pack(padx=8, pady=3)
 
         # Update Studio Mode & Parameters dynamically
-        if is_slide:
-            if hasattr(self, 'slide_p_count'):
-                self.slide_p_count.configure(text="Total: 1 Foto HD" if slide_count == 1 else (f"Total: {slide_count} Foto Slide" if slide_count else "Total: Album Slide"))
-            if hasattr(self, 'slide_p_res'):
-                self.slide_p_res.configure(text=f"Dimensi: {w}x{h} (Asli)" if w and h else "Dimensi: HD Original")
-            if hasattr(self, 'slide_p_audio'):
-                has_bgm = info.get('has_audio') or info.get('audio_url')
-                self.slide_p_audio.configure(text="Audio: Musik BGM (.mp3)" if has_bgm else "Audio: Tanpa Musik")
-
+        if is_slide or is_ugoira:
             if hasattr(self, 'mode_segmented'):
-                label_dl = "Unduh Foto HD" if slide_count == 1 else "Unduh Semua Slide (+ Audio)"
+                if is_ugoira:
+                    label_dl = "Unduh Animasi Ugoira"
+                elif slide_count == 1:
+                    label_dl = "Unduh Foto HD"
+                else:
+                    label_dl = "Unduh Semua Slide (+ Audio)"
                 self.mode_segmented.configure(values=[label_dl, "Audio Saja (Musik)"])
                 if self.mode_var.get() == "audio_only":
                     self.mode_segmented.set("Audio Saja (Musik)")
@@ -710,14 +741,26 @@ class App(ctk.CTk):
     # =========================================================================
     def _add_to_queue(self):
         raw = self.queue_textbox.get("1.0", "end").strip()
-        urls = [line.strip() for line in raw.splitlines() if line.strip()]
-        if not urls:
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        if not lines:
             self.show_toast("Tidak ada URL yang valid.", "warning")
             return
-        for url in urls:
-            self._add_queue_item(url)
+        added_count = 0
+        for line in lines:
+            m = re.search(r'https?://[^\s"\'<>]+', line)
+            clean_url = m.group(0).rstrip('，。！？!?,;)"\'\r\n') if m else line
+            self._add_queue_item(clean_url)
+            added_count += 1
         self.queue_textbox.delete("1.0", "end")
-        self.show_toast(f"{len(urls)} URL ditambahkan ke antrean.", "success")
+        self.show_toast(f"{added_count} URL ditambahkan ke antrean.", "success")
+
+    def _remove_queue_item(self, item_frame, item_entry):
+        try:
+            item_frame.destroy()
+        except Exception:
+            pass
+        if item_entry in self._queue_items:
+            self._queue_items.remove(item_entry)
 
     def _add_queue_item(self, url: str):
         item_frame = ctk.CTkFrame(self.queue_list_frame, fg_color="#131522", corner_radius=8)
@@ -725,19 +768,45 @@ class App(ctk.CTk):
         inner = ctk.CTkFrame(item_frame, fg_color="transparent")
         inner.pack(fill="x", padx=12, pady=8)
 
+        platform = detect_platform(url)
+        is_pixiv = (platform == 'pixiv')
+
+        # Badge platform
+        badge_text = "PIXIV" if is_pixiv else platform.upper()
+        badge_color = "#3B82F6" if is_pixiv else ("#EF4444" if platform == 'youtube' else "#4F46E5" if platform == 'tiktok' else "#6B7280")
+        b_frame = ctk.CTkFrame(inner, fg_color=badge_color, corner_radius=4)
+        b_frame.pack(side="left", padx=(0, 8))
+        ctk.CTkLabel(
+            b_frame, text=badge_text, font=ctk.CTkFont(size=9, weight="bold"),
+            text_color="white"
+        ).pack(padx=6, pady=2)
+
         url_lbl = ctk.CTkLabel(
             inner, text=url[:85] + ("..." if len(url) > 85 else ""),
             font=ctk.CTkFont(size=11), text_color="#D1D5DB", anchor="w"
         )
         url_lbl.pack(side="left", fill="x", expand=True)
 
+        item_entry = [url, None]
+
+        # Tombol hapus item individu (X)
+        del_btn = ctk.CTkButton(
+            inner, text="X", width=26, height=26, corner_radius=6,
+            fg_color="#1E2032", hover_color="#EF4444", text_color="#9CA3AF",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            command=lambda: self._remove_queue_item(item_frame, item_entry)
+        )
+        del_btn.pack(side="right", padx=(8, 0))
+
         status_var = ctk.StringVar(value="Menunggu")
         status_lbl = ctk.CTkLabel(
             inner, textvariable=status_var, font=ctk.CTkFont(size=11, weight="bold"),
-            text_color="#818CF8", width=110
+            text_color="#818CF8", width=95
         )
         status_lbl.pack(side="right")
-        self._queue_items.append((url, status_var))
+        item_entry[1] = status_var
+
+        self._queue_items.append(item_entry)
 
     def _start_queue(self):
         if not self._queue_items:
@@ -754,7 +823,15 @@ class App(ctk.CTk):
             self._queue_running = True
             completed = 0
 
-            for (url, status_var) in list(self._queue_items):
+            # Default format animasi Ugoira Pixiv dalam mode antrean batch selalu GIF
+            batch_ugoira_fmt = self.batch_ugoira_format_var.get() if hasattr(self, 'batch_ugoira_format_var') else "gif"
+            if not batch_ugoira_fmt:
+                batch_ugoira_fmt = "gif"
+
+            for item in list(self._queue_items):
+                url = item[0]
+                status_var = item[1]
+
                 self.after(0, lambda sv=status_var: sv.set("Mengunduh"))
                 self.after(0, lambda: self.progress_label.configure(
                     text=f"Antrean Berjalan: {completed+1}/{total}"
@@ -778,7 +855,9 @@ class App(ctk.CTk):
                     self.download_playlist_var.get(),
                     self.custom_output_path_var.get(),
                     self.custom_cmd_var.get().strip(),
-                    self.browser_cookie_var.get()
+                    self.browser_cookie_var.get(),
+                    None,
+                    batch_ugoira_fmt
                 )
 
                 self._queue_done_event.wait(timeout=3600)
@@ -973,17 +1052,53 @@ class App(ctk.CTk):
             self.lang_entry.focus()
         self._save_current_preferences()
 
+    def on_ugoira_fmt_change(self, value: str):
+        if "gif" in value.lower():
+            self.ugoira_format_var.set("gif")
+        else:
+            self.ugoira_format_var.set("mp4")
+        if hasattr(self, 'slide_p_format'):
+            fmt_val = self.ugoira_format_var.get().upper()
+            self.slide_p_format.configure(text=f"Target: Video/Animasi ({fmt_val})")
+
     def toggle_opts(self):
         if not (hasattr(self, 'video_opts') and hasattr(self, 'audio_opts')):
             return
 
+        is_ugoira = getattr(self, 'last_video_info', {}).get('is_ugoira', False) if hasattr(self, 'last_video_info') and self.last_video_info else False
         is_slide = getattr(self, 'last_video_info', {}).get('is_slide', False) if hasattr(self, 'last_video_info') and self.last_video_info else False
 
-        if is_slide:
-            slide_count = getattr(self, 'last_video_info', {}).get('slide_count', 0) if hasattr(self, 'last_video_info') and self.last_video_info else 0
+        # Tangani status checkbox 'Unduh Full Playlist' untuk mode non-video (Slide / Ugoira)
+        if is_slide or is_ugoira:
+            if not getattr(self, '_in_slide_or_ugoira_mode', False):
+                if hasattr(self, 'download_playlist_var'):
+                    self._saved_playlist_pref = self.download_playlist_var.get()
+                    self.download_playlist_var.set(False)
+                self._in_slide_or_ugoira_mode = True
+            if hasattr(self, 'download_playlist_cb'):
+                self.download_playlist_cb.configure(state="disabled")
+        else:
+            if getattr(self, '_in_slide_or_ugoira_mode', False):
+                self._in_slide_or_ugoira_mode = False
+                if hasattr(self, '_saved_playlist_pref') and hasattr(self, 'download_playlist_var'):
+                    self.download_playlist_var.set(self._saved_playlist_pref)
+            if hasattr(self, 'download_playlist_cb'):
+                self.download_playlist_cb.configure(state="normal")
+
+        if is_slide or is_ugoira:
+            w = getattr(self, 'last_video_info', {}).get('width')
+            h = getattr(self, 'last_video_info', {}).get('height')
+            slide_count = getattr(self, 'last_video_info', {}).get('slide_count', 0)
+
             if hasattr(self, 'format_title'):
-                title_fmt = "PARAMETER FOTO HD" if slide_count == 1 else "PARAMETER ALBUM SLIDE FOTO"
+                if is_ugoira:
+                    title_fmt = "PARAMETER ANIMASI PIXIV UGOIRA"
+                elif slide_count == 1:
+                    title_fmt = "PARAMETER FOTO HD"
+                else:
+                    title_fmt = "PARAMETER ALBUM SLIDE FOTO"
                 self.format_title.configure(text=title_fmt if self.mode_var.get() != "audio_only" else "PARAMETER FORMAT AUDIO (BGM)")
+
             if self.mode_var.get() == "audio_only":
                 if hasattr(self, 'slide_opts'): self.slide_opts.pack_forget()
                 self.video_opts.pack_forget()
@@ -991,7 +1106,47 @@ class App(ctk.CTk):
             else:
                 self.video_opts.pack_forget()
                 self.audio_opts.pack_forget()
-                if hasattr(self, 'slide_opts'): self.slide_opts.pack(fill="x")
+                if hasattr(self, 'slide_opts'):
+                    self.slide_opts.pack(fill="x")
+
+                    if is_ugoira:
+                        if hasattr(self, 'slide_banner_title'):
+                            self.slide_banner_title.configure(text="MODE ANIMASI PIXIV UGOIRA")
+                        if hasattr(self, 'slide_badge_lbl'):
+                            self.slide_badge_lbl.configure(text="Ugoira", fg_color="#0055A5", text_color="#E0F2FE")
+                        if hasattr(self, 'slide_status_lbl'):
+                            self.slide_status_lbl.configure(text="Pixiv Ugoira terdiri dari susunan frame gambar berseri yang dirakit otomatis menjadi video MP4 atau animasi GIF.")
+                        if hasattr(self, 'slide_p_count'):
+                            self.slide_p_count.configure(text="Tipe: Animasi Berseri")
+                        if hasattr(self, 'slide_p_format'):
+                            curr_fmt = getattr(self, 'ugoira_format_var', None)
+                            fmt_val = curr_fmt.get().upper() if curr_fmt else "MP4"
+                            self.slide_p_format.configure(text=f"Target: Video/Animasi ({fmt_val})")
+                        if hasattr(self, 'slide_p_res'):
+                            self.slide_p_res.configure(text=f"Dimensi: {w}x{h} (Asli)" if w and h else "Dimensi: HD Original")
+                        if hasattr(self, 'slide_p_audio'):
+                            self.slide_p_audio.configure(text="Audio: Tanpa Musik (Murni Animasi)")
+                        if hasattr(self, 'ugoira_fmt_container'):
+                            self.ugoira_fmt_container.pack(fill="x", pady=(8, 0))
+                    else:
+                        if hasattr(self, 'slide_banner_title'):
+                            self.slide_banner_title.configure(text="MODE ALBUM SLIDE FOTO")
+                        if hasattr(self, 'slide_badge_lbl'):
+                            self.slide_badge_lbl.configure(text="HD Original", fg_color="#312E81", text_color="#E0E7FF")
+                        if hasattr(self, 'slide_status_lbl'):
+                            self.slide_status_lbl.configure(text="MavDown akan mengunduh semua file gambar asli HD tanpa watermark ke subfolder album khusus beserta file musik BGM.")
+                        if hasattr(self, 'slide_p_count'):
+                            self.slide_p_count.configure(text="Total: 1 Foto HD" if slide_count == 1 else (f"Total: {slide_count} Foto Slide" if slide_count else "Total: Album Slide"))
+                        if hasattr(self, 'slide_p_format'):
+                            self.slide_p_format.configure(text="Format: JPEG HD (Lossless)")
+                        if hasattr(self, 'slide_p_res'):
+                            self.slide_p_res.configure(text=f"Dimensi: {w}x{h} (Asli)" if w and h else "Dimensi: HD Original")
+                        if hasattr(self, 'slide_p_audio'):
+                            has_bgm = getattr(self, 'last_video_info', {}).get('has_audio', False)
+                            self.slide_p_audio.configure(text="Audio: Musik BGM (.mp3)" if has_bgm else "Audio: Tanpa Musik")
+                        if hasattr(self, 'ugoira_fmt_container'):
+                            self.ugoira_fmt_container.pack_forget()
+
             if hasattr(self, 'sec_sub'):
                 self.sec_sub.pack_forget()
             if hasattr(self, 'embed_subs_cb'):
@@ -1291,7 +1446,7 @@ class App(ctk.CTk):
             self.subs_lang_var.get().strip(), self.embed_thumb_var.get(),
             self.use_aria2_var.get(), self.download_playlist_var.get(),
             self.custom_output_path_var.get(), self.custom_cmd_var.get().strip(),
-            self.browser_cookie_var.get(), share_ctx
+            self.browser_cookie_var.get(), share_ctx, self.ugoira_format_var.get()
         ), daemon=True).start()
 
     def on_stop(self):

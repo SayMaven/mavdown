@@ -7,6 +7,7 @@ from engines.pinterest import get_pinterest_info, download_pinterest
 from engines.instagram import get_instagram_info, download_instagram
 from engines.facebook import get_facebook_info, download_facebook
 from engines.bilibili import get_bilibili_info, download_bilibili
+from engines.pixiv import get_pixiv_info, download_pixiv
 
 SERVICE_FOLDER_MAP = {
     'youtube': 'Mavdown_YouTube',
@@ -19,6 +20,7 @@ SERVICE_FOLDER_MAP = {
     'pinterest': 'Mavdown_Pinterest',
     'facebook': 'Mavdown_Facebook',
     'bilibili': 'Mavdown_Bilibili',
+    'pixiv': 'Mavdown_Pixiv',
     'threads': 'Mavdown_Threads',
     'reddit': 'Mavdown_Reddit',
     'vimeo': 'Mavdown_Vimeo',
@@ -86,6 +88,8 @@ def detect_platform(url: str) -> str:
         return 'facebook'
     elif 'bilibili.com' in url_lower or 'b23.tv' in url_lower:
         return 'bilibili'
+    elif 'pixiv.net' in url_lower or 'pixiv.me' in url_lower:
+        return 'pixiv'
     elif 'threads.net' in url_lower:
         return 'threads'
     elif 'reddit.com' in url_lower:
@@ -120,6 +124,8 @@ def resolve_fast_info(url: str, share_text: str = None) -> dict:
             return get_facebook_info(url)
         elif platform == 'bilibili':
             return get_bilibili_info(url)
+        elif platform == 'pixiv':
+            return get_pixiv_info(url)
     except Exception:
         pass
     return None
@@ -130,7 +136,7 @@ def dispatch_fast_download(url: str, output_dir: str, ui_queue=None, options=Non
     Mengembalikan True jika sukses, False jika gagal atau harus beralih ke Tier 2 (yt-dlp).
     """
     platform = detect_platform(url)
-    tier1_supported = ('tiktok', 'douyin', 'twitter', 'pinterest', 'instagram', 'facebook', 'bilibili')
+    tier1_supported = ('tiktok', 'douyin', 'twitter', 'pinterest', 'instagram', 'facebook', 'bilibili', 'pixiv')
     if platform not in tier1_supported:
         # Bukan platform Tier 1, langsung serahkan ke yt-dlp
         return False
@@ -153,6 +159,8 @@ def dispatch_fast_download(url: str, output_dir: str, ui_queue=None, options=Non
             return download_facebook(url, output_dir, ui_queue, options, abort_checker)
         elif platform == 'bilibili':
             return download_bilibili(url, output_dir, ui_queue, options, abort_checker)
+        elif platform == 'pixiv':
+            return download_pixiv(url, output_dir, ui_queue, options, abort_checker)
     except Exception as e:
         if ui_queue:
             ui_queue.put({"type": "log", "text": f"[TIER 1 EXCEPTION] {e}\n"})

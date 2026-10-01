@@ -38,7 +38,7 @@ def ensure_entry_thumbnail(entry: dict) -> str:
     # 1. Sumber: File gambar lokal tunggal
     if fpath and os.path.isfile(fpath):
         ext = os.path.splitext(fpath)[1].lower()
-        if ext in ('.jpg', '.jpeg', '.png', '.webp', '.bmp'):
+        if ext in ('.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif'):
             try:
                 with Image.open(fpath) as im:
                     im = im.convert('RGB')
@@ -73,17 +73,37 @@ def ensure_entry_thumbnail(entry: dict) -> str:
                 except Exception:
                     pass
 
-    # 3. Sumber: Folder album slide lokal (ambil foto pertama)
+    # 3. Sumber: Folder album slide / ugoira lokal
     if fpath and os.path.isdir(fpath):
         try:
             for item in sorted(os.listdir(fpath)):
-                if item.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+                lower = item.lower()
+                if lower.endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
                     first_img = os.path.join(fpath, item)
                     with Image.open(first_img) as im:
                         im = im.convert('RGB')
                         im.thumbnail((240, 144), Image.Resampling.LANCZOS)
                         im.save(target_thumb, "JPEG", quality=85)
                     if os.path.isfile(target_thumb):
+                        return target_thumb
+                elif lower.endswith(('.mp4', '.mkv', '.webm', '.mov')) and os.path.exists(FFMPEG_PATH):
+                    v_file = os.path.join(fpath, item)
+                    cmd = [
+                        FFMPEG_PATH, "-y",
+                        "-ss", "00:00:00.5",
+                        "-i", v_file,
+                        "-vframes", "1",
+                        "-vf", "scale=240:-2",
+                        "-q:v", "2",
+                        target_thumb
+                    ]
+                    startupinfo = None
+                    if os.name == 'nt':
+                        startupinfo = subprocess.STARTUPINFO()
+                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                        startupinfo.wShowWindow = subprocess.SW_HIDE
+                    subprocess.run(cmd, capture_output=True, timeout=8, startupinfo=startupinfo)
+                    if os.path.isfile(target_thumb) and os.path.getsize(target_thumb) > 500:
                         return target_thumb
         except Exception:
             pass

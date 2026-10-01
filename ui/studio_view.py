@@ -139,10 +139,11 @@ def build_studio_view(app, parent):
 
     s_btop = ctk.CTkFrame(s_banner, fg_color="transparent")
     s_btop.pack(fill="x", padx=12, pady=(10, 4))
-    ctk.CTkLabel(
+    app.slide_banner_title = ctk.CTkLabel(
         s_btop, text="MODE ALBUM SLIDE FOTO",
         font=ctk.CTkFont(size=11, weight="bold"), text_color="#A5B4FC"
-    ).pack(side="left")
+    )
+    app.slide_banner_title.pack(side="left")
     app.slide_badge_lbl = ctk.CTkLabel(
         s_btop, text="HD Original", font=ctk.CTkFont(size=10, weight="bold"),
         fg_color="#312E81", text_color="#E0E7FF", corner_radius=4, padx=8, pady=2
@@ -172,6 +173,23 @@ def build_studio_view(app, parent):
 
     app.slide_p_audio = ctk.CTkLabel(s_grid, text="Audio: Musik BGM (.mp3)", font=ctk.CTkFont(size=11), text_color="#D1D5DB", anchor="w")
     app.slide_p_audio.grid(row=1, column=1, sticky="w", padx=12, pady=6)
+
+    # Format output Ugoira selector (dinamis jika media adalah animasi Ugoira)
+    app.ugoira_fmt_container = ctk.CTkFrame(app.slide_opts, fg_color="transparent")
+    ctk.CTkLabel(
+        app.ugoira_fmt_container, text="PILIH FORMAT HASIL ANIMASI:",
+        font=ctk.CTkFont(size=10, weight="bold"), text_color=THEME["text_muted"]
+    ).pack(anchor="w", pady=(8, 4))
+
+    app.ugoira_fmt_segmented = ctk.CTkSegmentedButton(
+        app.ugoira_fmt_container, values=["Video (MP4)", "Animasi (GIF)"],
+        command=app.on_ugoira_fmt_change,
+        selected_color=THEME["accent_indigo"], selected_hover_color=THEME["accent_indigo_hover"],
+        unselected_color="#131422", unselected_hover_color="#1E2032",
+        text_color=THEME["text_title"], font=ctk.CTkFont(size=11, weight="bold"), height=34
+    )
+    app.ugoira_fmt_segmented.set("Video (MP4)")
+    app.ugoira_fmt_segmented.pack(fill="x")
 
     # Audio options frame
     app.audio_opts = ctk.CTkFrame(fc_in, fg_color="transparent")

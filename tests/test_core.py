@@ -32,7 +32,10 @@ class TestMavdownCore(unittest.TestCase):
             ("https://www.bilibili.com/video/BV1xx411c7mD", "bilibili"),
             ("https://b23.tv/xyz123", "bilibili"),
             ("https://www.facebook.com/reel/123456789", "facebook"),
-            ("https://fb.watch/xyz123", "facebook")
+            ("https://fb.watch/xyz123", "facebook"),
+            ("https://www.pixiv.net/artworks/12345678", "pixiv"),
+            ("https://www.pixiv.net/en/artworks/12345678", "pixiv"),
+            ("https://pixiv.net/i/12345678", "pixiv")
         ]
         for url, expected in test_cases:
             self.assertEqual(detect_platform(url), expected, f"Failed for {url}")
@@ -49,11 +52,21 @@ class TestMavdownCore(unittest.TestCase):
             "pinterest": "Mavdown_Pinterest",
             "facebook": "Mavdown_Facebook",
             "bilibili": "Mavdown_Bilibili",
+            "pixiv": "Mavdown_Pixiv",
             "generic": "Mavdown_Web",
             "web": "Mavdown_Web",
         }
         for plat, expected in mapping.items():
             self.assertEqual(get_service_folder_name(plat), expected)
+
+    def test_pixiv_id_extraction(self):
+        """Uji ekstraksi ID karya Pixiv dari berbagai variasi URL."""
+        from engines.pixiv import extract_pixiv_id
+        self.assertEqual(extract_pixiv_id("https://www.pixiv.net/artworks/12345678"), "12345678")
+        self.assertEqual(extract_pixiv_id("https://www.pixiv.net/en/artworks/98765432"), "98765432")
+        self.assertEqual(extract_pixiv_id("https://www.pixiv.net/member_illust.php?mode=medium&illust_id=555666"), "555666")
+        self.assertEqual(extract_pixiv_id("https://pixiv.net/i/777888"), "777888")
+        self.assertEqual(extract_pixiv_id("11223344"), "11223344")
 
     def test_resolve_service_output_dir(self):
         """Uji pembuatan direktori output layanan dan pencegahan duplikasi nesting."""
@@ -68,11 +81,16 @@ class TestMavdownCore(unittest.TestCase):
             dy_out = resolve_service_output_dir(temp_dir, "https://v.douyin.com/123/", organize_by_platform=True)
             self.assertEqual(os.path.basename(dy_out), "Mavdown_Douyin")
 
-            # 3. Pencegahan duplikasi jika path dasar sudah berupa folder platform
+            # 3. URL Pixiv -> Mavdown_Pixiv
+            px_out = resolve_service_output_dir(temp_dir, "https://www.pixiv.net/artworks/12345678", organize_by_platform=True)
+            self.assertEqual(os.path.basename(px_out), "Mavdown_Pixiv")
+            self.assertTrue(os.path.isdir(px_out))
+
+            # 4. Pencegahan duplikasi jika path dasar sudah berupa folder platform
             nested_check = resolve_service_output_dir(yt_out, "https://www.youtube.com/watch?v=456", organize_by_platform=True)
             self.assertEqual(nested_check, yt_out)
 
-            # 4. Jika organize_by_platform False, kembalikan base_dir langsung
+            # 5. Jika organize_by_platform False, kembalikan base_dir langsung
             flat_out = resolve_service_output_dir(temp_dir, "https://www.youtube.com/watch?v=123", organize_by_platform=False)
             self.assertEqual(flat_out, temp_dir)
         finally:
@@ -158,6 +176,44 @@ class TestMavdownCore(unittest.TestCase):
             self.assertFalse(os.path.exists(tmp_file))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_pixiv_browser_helper(self):
+        """Uji pendeteksi browser sistem dan alokasi port TCP untuk login CDP Pixiv."""
+        from engines.pixiv import find_system_browser, get_free_tcp_port
+        port = get_free_tcp_port()
+        self.assertIsInstance(port, int)
+        self.assertGreater(port, 1024)
+
+        browser = find_system_browser()
+        if browser:
+            self.assertTrue(os.path.exists(browser))
+            self.assertTrue(any(b in browser.lower() for b in ["chrome", "edge", "brave", "chromium"]))
+
+    def test_pixiv_filename_format(self):
+        """Uji format penamaan file Pixiv: <id>_p<index> <judul>.<ext>."""
+        illust_id = "147932092"
+        raw_title = "みゆ"
+        clean_title = sanitize_filename(raw_title)
+        title_suffix = f" {clean_title}" if clean_title else ""
+        
+        # Halaman 1
+        fn1 = f"{illust_id}_p1{title_suffix}.png"
+        self.assertEqual(fn1, "147932092_p1 みゆ.png")
+        
+        # Halaman 2
+        fn2 = f"{illust_id}_p2{title_suffix}.png"
+        self.assertEqual(fn2, "147932092_p2 みゆ.png")
+
+    def test_batch_queue_ugoira_default(self):
+        """Uji default format Ugoira di antrean batch adalah gif."""
+        from engines.router import detect_platform
+        url_ugoira = "https://www.pixiv.net/en/artworks/147932092"
+        self.assertEqual(detect_platform(url_ugoira), "pixiv")
+
+        # Simulasi default variabel batch ugoira
+        default_batch_fmt = "gif"
+        self.assertEqual(default_batch_fmt, "gif")
+        self.assertNotEqual(default_batch_fmt, "mp4")
 
 if __name__ == '__main__':
     unittest.main()

@@ -127,6 +127,17 @@ def load_organize_by_platform() -> bool:
     data = _read_raw_config()
     return bool(data.get("organize_by_platform", True))
 
+def save_pixiv_session(session: str):
+    """Simpan cookie sesi PHPSESSID Pixiv ke config file."""
+    data = _read_raw_config()
+    data["pixiv_session"] = session.strip() if session else ""
+    _write_raw_config(data)
+
+def load_pixiv_session() -> str:
+    """Muat cookie sesi PHPSESSID Pixiv tersimpan."""
+    data = _read_raw_config()
+    return data.get("pixiv_session", "")
+
 def load_config() -> str:
     """Kembalikan path output yang tersimpan (backward-compatible)."""
     if not os.path.exists(DEFAULT_OUTPUT_DIR):

@@ -1,8 +1,8 @@
 # ---------------------------------------------------------------------------
-# MAVDOWN UI CONSTANTS & PALETTES (v1.2.0)
+# MAVDOWN UI CONSTANTS & PALETTES (v1.2.1)
 # ---------------------------------------------------------------------------
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 APP_TITLE = f"Maven Downloader v{APP_VERSION}"
 
 # Pemetaan Bahasa Subtitle / Lirik
@@ -34,6 +34,7 @@ PLATFORM_PATTERNS = [
     (r'dailymotion\.com',              "Dailymotion",   "#0066DC"),
     (r'reddit\.com',                   "Reddit",        "#FF4500"),
     (r'bilibili\.com|b23\.tv',         "Bilibili",      "#00A1D6"),
+    (r'pixiv\.net|pixiv\.me',          "Pixiv",         "#0096FA"),
 ]
 
 # Quick Preset Profiles
