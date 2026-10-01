@@ -93,7 +93,7 @@ def _write_raw_config(data: dict):
     except Exception as e:
         print(f"ERROR saving config: {e}")
 
-def save_config(path: str = None, browser_cookie: str = None, proxy: str = None, clipboard_monitor: bool = None):
+def save_config(path: str = None, browser_cookie: str = None, proxy: str = None, clipboard_monitor: bool = None, organize_by_platform: bool = None):
     """
     Simpan folder output unduhan, cookie browser, proxy, dan preferensi clipboard ke config file.
     """
@@ -111,8 +111,21 @@ def save_config(path: str = None, browser_cookie: str = None, proxy: str = None,
         data["proxy"] = proxy.strip()
     if clipboard_monitor is not None:
         data["clipboard_monitor"] = bool(clipboard_monitor)
+    if organize_by_platform is not None:
+        data["organize_by_platform"] = bool(organize_by_platform)
         
     _write_raw_config(data)
+
+def save_organize_by_platform(enabled: bool):
+    """Simpan preferensi pengelompokan folder per layanan/platform."""
+    data = _read_raw_config()
+    data["organize_by_platform"] = bool(enabled)
+    _write_raw_config(data)
+
+def load_organize_by_platform() -> bool:
+    """Muat preferensi pengelompokan folder per layanan (default: True)."""
+    data = _read_raw_config()
+    return bool(data.get("organize_by_platform", True))
 
 def load_config() -> str:
     """Kembalikan path output yang tersimpan (backward-compatible)."""

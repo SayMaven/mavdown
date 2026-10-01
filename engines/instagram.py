@@ -313,7 +313,8 @@ def download_instagram(url: str, output_dir: str, ui_queue=None, options=None, a
         # KASUS A: Multi-Slide Carousel (Foto / Video)
         # -------------------------------------------------------------
         if media_items and len(media_items) > 1:
-            slide_folder = os.path.join(output_dir, f"{base_name} [Instagram Slide]")
+            folder_name = base_name if base_name else "Instagram_Slide"
+            slide_folder = os.path.join(output_dir, folder_name)
             os.makedirs(slide_folder, exist_ok=True)
 
             total_items = len(media_items)

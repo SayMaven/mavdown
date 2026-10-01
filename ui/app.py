@@ -13,7 +13,8 @@ from config import (
     BASE_DIR, DEFAULT_OUTPUT_DIR, load_config, save_config,
     load_browser_cookie, load_preferences, save_preferences, is_aria2_available,
     load_ytdlp_channel, save_ytdlp_channel, load_proxy, save_proxy,
-    load_clipboard_monitor, save_clipboard_monitor
+    load_clipboard_monitor, save_clipboard_monitor,
+    load_organize_by_platform, save_organize_by_platform
 )
 from downloader import (
     ui_queue, get_video_info, download_video_logic,
@@ -66,6 +67,7 @@ class App(ctk.CTk):
         self.download_playlist_var = ctk.BooleanVar(value=False)
         self.proxy_var = ctk.StringVar(value=load_proxy())
         self.clipboard_monitor_var = ctk.BooleanVar(value=load_clipboard_monitor())
+        self.organize_by_platform_var = ctk.BooleanVar(value=load_organize_by_platform())
 
         # ── Runtime State ────────────────────────────────────────────────────
         self.last_video_info: dict = {}

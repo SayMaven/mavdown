@@ -611,7 +611,8 @@ def download_douyin(url: str, output_dir: str, ui_queue=None, options=None, abor
         if not images and data.get('images'):
             images = data['images']
             
-        slide_folder = os.path.join(output_dir, f"{base_name} [Douyin Slide]")
+        folder_name = base_name if base_name else "Douyin_Slide"
+        slide_folder = os.path.join(output_dir, folder_name)
         os.makedirs(slide_folder, exist_ok=True)
 
         total_img = len(images)

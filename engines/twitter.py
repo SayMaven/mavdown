@@ -104,7 +104,8 @@ def download_twitter(url: str, output_dir: str, ui_queue=None, options=None, abo
             if ui_queue:
                 ui_queue.put({"type": "log", "text": f"[TIER 1] Terdeteksi Multi-Media ({len(all_media)} item).\n"})
 
-            media_folder = os.path.join(output_dir, f"{base_name} [Twitter Media]")
+            folder_name = base_name if base_name else "Twitter_Media"
+            media_folder = os.path.join(output_dir, folder_name)
             os.makedirs(media_folder, exist_ok=True)
 
             for i, m in enumerate(all_media, 1):

@@ -5,7 +5,8 @@ from tkinter import filedialog
 from config import (
     BASE_DIR, DEFAULT_OUTPUT_DIR, save_config, save_preferences,
     is_aria2_available, save_ytdlp_channel, load_ytdlp_channel,
-    save_proxy, load_proxy, save_clipboard_monitor, load_clipboard_monitor
+    save_proxy, load_proxy, save_clipboard_monitor, load_clipboard_monitor,
+    save_organize_by_platform, load_organize_by_platform
 )
 from downloader import get_local_ytdlp_version
 from ui.widgets import ThemedDropdown
@@ -70,6 +71,23 @@ def build_settings_view(app, parent):
         fg_color="#1E2032", hover_color="#2B2E45",
         font=ctk.CTkFont(size=11), command=app.open_folder
     ).pack(side="left")
+
+    app.organize_by_platform_switch = ctk.CTkSwitch(
+        s1_in,
+        text="Kelompokkan unduhan ke folder platform (Mavdown_YouTube, Mavdown_Douyin, dll.)",
+        variable=app.organize_by_platform_var,
+        font=ctk.CTkFont(size=11, weight="bold"),
+        text_color=THEME["text_title"],
+        progress_color=THEME["accent_emerald"],
+        command=lambda: _on_organize_platform_toggle(app)
+    )
+    app.organize_by_platform_switch.pack(anchor="w", pady=(10, 2))
+
+    ctk.CTkLabel(
+        s1_in,
+        text="Video dan audio disimpan langsung di dalam folder platform (misal: Downloads/Mavdown_Douyin/video.mp4). Untuk album slide/foto dibuatkan subfolder khusus sesuai judulnya.",
+        font=ctk.CTkFont(size=10), text_color=THEME["text_dim"], wraplength=600, justify="left"
+    ).pack(anchor="w", pady=(0, 0))
 
     # ══ SECTION 2: BROWSER COOKIE ═════════════════════════════════════
     sec2 = ctk.CTkFrame(sv_scroll, fg_color=THEME["card_inner"], corner_radius=10)
@@ -410,6 +428,14 @@ def _on_cookie_change(app, value: str):
     app.browser_cookie_var.set(cookie)
     save_config(path=app.custom_output_path_var.get(), browser_cookie=cookie)
     app.show_toast("Cookie browser diperbarui.", "success")
+
+
+def _on_organize_platform_toggle(app):
+    """Handler perubahan toggle pengelompokan folder per layanan."""
+    val = app.organize_by_platform_var.get()
+    save_organize_by_platform(val)
+    msg = "Pengelompokan folder per layanan diaktifkan." if val else "Pengelompokan folder per layanan dinonaktifkan."
+    app.show_toast(msg, "info")
 
 
 def _reset_prefs(app):

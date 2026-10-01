@@ -12,9 +12,13 @@ import html
 
 from config import (
     YT_DLP_PATH, ARIA2_PATH, FFMPEG_PATH, NODE_PATH,
-    DEFAULT_OUTPUT_DIR, load_proxy, get_ytdlp_update_dest, refresh_binary_paths
+    DEFAULT_OUTPUT_DIR, load_proxy, load_organize_by_platform,
+    get_ytdlp_update_dest, refresh_binary_paths
 )
-from engines import resolve_fast_info, dispatch_fast_download, detect_platform
+from engines import (
+    resolve_fast_info, dispatch_fast_download, detect_platform,
+    resolve_service_output_dir
+)
 from engines.base import cleanup_orphaned_temp_files
 
 # Antrean pesan untuk thread safety
@@ -553,17 +557,20 @@ def process_downloaded_subtitles(output_dir: str, download_start_time: float, is
 
 def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container, download_subs, embed_subs, subs_lang, embed_thumb, use_aria2, download_playlist, custom_path, custom_cmd, browser_cookie="Tidak Ada", share_text=None):
     global current_process
-    output_dir = custom_path if custom_path else DEFAULT_OUTPUT_DIR
+    base_output_dir = custom_path if custom_path else DEFAULT_OUTPUT_DIR
+    
+    organize = load_organize_by_platform()
+    output_dir = resolve_service_output_dir(base_output_dir, url, organize_by_platform=organize)
     
     ui_queue.put({"type": "progress", "value": 0, "text": "Progress: 0.0%"})
     reset_download_phase()  # Reset fase video/audio untuk download baru
 
     if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
         
     ui_queue.put({"type": "log", "text": f"\n\n{'='*50}\n"})
     ui_queue.put({"type": "log", "text": f"URL Sumber: {url}\n"}) 
-    ui_queue.put({"type": "log", "text": f"Memulai Unduhan Baru Ke: {output_dir}\n"})
+    ui_queue.put({"type": "log", "text": f"Folder Output: {output_dir}\n"})
     
     reset_abort()
 
@@ -747,7 +754,10 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
                 target_fmt = effective_afmt if mode == "audio_only" else effective_cont
                 ui_queue.put({"type": "log", "text": f"[INFO] Format .{target_fmt} tidak mendukung embed thumbnail. Opsi embed thumbnail dilewati.\n"})
                 
-        options.extend(["-o", os.path.join(output_dir, "%(title).100s.%(ext)s")])
+        if download_playlist:
+            options.extend(["-o", os.path.join(output_dir, "%(playlist_title|Playlist)s", "%(title).100s.%(ext)s")])
+        else:
+            options.extend(["-o", os.path.join(output_dir, "%(title).100s.%(ext)s")])
         
     command = create_yt_dlp_command(url, options)
     ui_queue.put({"type": "log", "text": f"\nPerintah: {' '.join(command)}\n"})

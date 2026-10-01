@@ -8,7 +8,7 @@ import shutil
 import config
 import history
 from history import add_history_entry, get_history_entries, delete_history_entry, clear_all_history
-from engines.router import detect_platform
+from engines.router import detect_platform, get_service_folder_name, resolve_service_output_dir
 from engines.base import sanitize_filename, format_bytes, format_time, cleanup_orphaned_temp_files
 from engines.douyin import extract_douyin_share_info
 
@@ -36,6 +36,47 @@ class TestMavdownCore(unittest.TestCase):
         ]
         for url, expected in test_cases:
             self.assertEqual(detect_platform(url), expected, f"Failed for {url}")
+
+    def test_service_folder_mapping(self):
+        """Uji pemetaan nama folder layanan standar Mavdown_<Platform>."""
+        mapping = {
+            "youtube": "Mavdown_YouTube",
+            "douyin": "Mavdown_Douyin",
+            "tiktok": "Mavdown_TikTok",
+            "instagram": "Mavdown_Instagram",
+            "twitter": "Mavdown_Twitter",
+            "x": "Mavdown_Twitter",
+            "pinterest": "Mavdown_Pinterest",
+            "facebook": "Mavdown_Facebook",
+            "bilibili": "Mavdown_Bilibili",
+            "generic": "Mavdown_Web",
+            "web": "Mavdown_Web",
+        }
+        for plat, expected in mapping.items():
+            self.assertEqual(get_service_folder_name(plat), expected)
+
+    def test_resolve_service_output_dir(self):
+        """Uji pembuatan direktori output layanan dan pencegahan duplikasi nesting."""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            # 1. URL YouTube -> Mavdown_YouTube
+            yt_out = resolve_service_output_dir(temp_dir, "https://www.youtube.com/watch?v=123", organize_by_platform=True)
+            self.assertEqual(os.path.basename(yt_out), "Mavdown_YouTube")
+            self.assertTrue(os.path.isdir(yt_out))
+
+            # 2. URL Douyin -> Mavdown_Douyin
+            dy_out = resolve_service_output_dir(temp_dir, "https://v.douyin.com/123/", organize_by_platform=True)
+            self.assertEqual(os.path.basename(dy_out), "Mavdown_Douyin")
+
+            # 3. Pencegahan duplikasi jika path dasar sudah berupa folder platform
+            nested_check = resolve_service_output_dir(yt_out, "https://www.youtube.com/watch?v=456", organize_by_platform=True)
+            self.assertEqual(nested_check, yt_out)
+
+            # 4. Jika organize_by_platform False, kembalikan base_dir langsung
+            flat_out = resolve_service_output_dir(temp_dir, "https://www.youtube.com/watch?v=123", organize_by_platform=False)
+            self.assertEqual(flat_out, temp_dir)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_sanitize_filename(self):
         """Uji sanitasi karakter terlarang Windows."""

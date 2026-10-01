@@ -141,7 +141,8 @@ def download_tiktok(url: str, output_dir: str, ui_queue=None, options=None, abor
             if ui_queue:
                 ui_queue.put({"type": "log", "text": f"[TIER 1] Terdeteksi Album Slide Foto ({len(images)} foto).\n"})
 
-            slide_folder = os.path.join(output_dir, f"{base_name} [Slide Foto]")
+            folder_name = base_name if base_name else "TikTok_Slide"
+            slide_folder = os.path.join(output_dir, folder_name)
             os.makedirs(slide_folder, exist_ok=True)
 
             # Unduh setiap foto satu per satu
