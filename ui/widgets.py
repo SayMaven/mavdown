@@ -123,7 +123,7 @@ class ThemedDropdown(ctk.CTkFrame):
             # Baris item
             row_btn = ctk.CTkButton(
                 pop_frame,
-                text=f"  {val}" + ("          ✓" if is_active else ""),
+                text=f"  {val}",
                 anchor="w",
                 height=28,
                 corner_radius=6,

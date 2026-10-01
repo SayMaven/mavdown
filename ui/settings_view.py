@@ -4,7 +4,8 @@ import customtkinter as ctk
 from tkinter import filedialog
 from config import (
     BASE_DIR, DEFAULT_OUTPUT_DIR, save_config, save_preferences,
-    is_aria2_available, save_ytdlp_channel, load_ytdlp_channel
+    is_aria2_available, save_ytdlp_channel, load_ytdlp_channel,
+    save_proxy, load_proxy, save_clipboard_monitor, load_clipboard_monitor
 )
 from downloader import get_local_ytdlp_version
 from ui.widgets import ThemedDropdown
@@ -102,6 +103,77 @@ def build_settings_view(app, parent):
         text="Berguna jika mengunduh konten privat / restricted yang membutuhkan sesi login aktif di browser.",
         font=ctk.CTkFont(size=10), text_color=THEME["text_dim"], wraplength=600, justify="left"
     ).pack(anchor="w", pady=(6, 0))
+
+    # ══ SECTION 2B: PEMANTAU PAPAN KLIP (AUTO CLIPBOARD) ══════════════
+    sec_clip = ctk.CTkFrame(sv_scroll, fg_color=THEME["card_inner"], corner_radius=10)
+    sec_clip.pack(fill="x", pady=(0, 10))
+    s_clip_in = ctk.CTkFrame(sec_clip, fg_color="transparent")
+    s_clip_in.pack(fill="x", padx=14, pady=12)
+
+    ctk.CTkLabel(
+        s_clip_in, text="PEMANTAU PAPAN KLIP (AUTO-DETECT CLIPBOARD)",
+        font=ctk.CTkFont(size=10, weight="bold"), text_color=THEME["text_dim"]
+    ).pack(anchor="w", pady=(0, 6))
+
+    clip_row = ctk.CTkFrame(s_clip_in, fg_color="transparent")
+    clip_row.pack(fill="x")
+
+    ctk.CTkLabel(
+        clip_row,
+        text="Otomatis mendeteksi tautan media saat disalin di browser dan memuatnya ke Studio.",
+        font=ctk.CTkFont(size=11), text_color=THEME["text_muted"], anchor="w", justify="left",
+        wraplength=480
+    ).pack(side="left", fill="x", expand=True)
+
+    def _on_clip_toggle():
+        val = app.clipboard_monitor_var.get()
+        save_clipboard_monitor(val)
+        status_str = "diaktifkan" if val else "dinonaktifkan"
+        app.show_toast(f"Pemantau papan klip {status_str}.", "info")
+
+    clip_switch = ctk.CTkSwitch(
+        clip_row, text="", variable=app.clipboard_monitor_var,
+        command=_on_clip_toggle,
+        progress_color=THEME["accent_emerald"], button_color="#FFFFFF"
+    )
+    clip_switch.pack(side="right")
+
+    # ══ SECTION 2C: PROXY JARINGAN ════════════════════════════════════
+    sec_proxy = ctk.CTkFrame(sv_scroll, fg_color=THEME["card_inner"], corner_radius=10)
+    sec_proxy.pack(fill="x", pady=(0, 10))
+    s_proxy_in = ctk.CTkFrame(sec_proxy, fg_color="transparent")
+    s_proxy_in.pack(fill="x", padx=14, pady=12)
+
+    ctk.CTkLabel(
+        s_proxy_in, text="PROXY JARINGAN (BYPASS BLOKIR ISP / GEO-RESTRICTION)",
+        font=ctk.CTkFont(size=10, weight="bold"), text_color=THEME["text_dim"]
+    ).pack(anchor="w", pady=(0, 6))
+
+    proxy_row = ctk.CTkFrame(s_proxy_in, fg_color="transparent")
+    proxy_row.pack(fill="x")
+
+    app.settings_proxy_entry = ctk.CTkEntry(
+        proxy_row, textvariable=app.proxy_var, placeholder_text="Contoh: http://127.0.0.1:7890 atau socks5://127.0.0.1:1080",
+        height=36, corner_radius=8,
+        border_color=THEME["border_light"], fg_color="#0A0B12", text_color=THEME["text_body"],
+        font=ctk.CTkFont(size=11)
+    )
+    app.settings_proxy_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+    def _on_save_proxy():
+        p_val = app.proxy_var.get().strip()
+        save_proxy(p_val)
+        if p_val:
+            app.show_toast(f"Proxy disimpan: {p_val}", "success")
+        else:
+            app.show_toast("Proxy dikosongkan (Koneksi langsung).", "info")
+
+    ctk.CTkButton(
+        proxy_row, text="Simpan Proxy", width=110, height=36, corner_radius=8,
+        fg_color=THEME["accent_indigo"], hover_color=THEME["accent_indigo_hover"],
+        font=ctk.CTkFont(size=11, weight="bold"),
+        command=_on_save_proxy
+    ).pack(side="left")
 
     # ══ SECTION 3: RESET PREFERENCES ══════════════════════════════════
     sec3 = ctk.CTkFrame(sv_scroll, fg_color=THEME["card_inner"], corner_radius=10)

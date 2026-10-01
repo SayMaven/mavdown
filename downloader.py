@@ -12,9 +12,10 @@ import html
 
 from config import (
     YT_DLP_PATH, ARIA2_PATH, FFMPEG_PATH, NODE_PATH,
-    DEFAULT_OUTPUT_DIR
+    DEFAULT_OUTPUT_DIR, load_proxy, get_ytdlp_update_dest, refresh_binary_paths
 )
 from engines import resolve_fast_info, dispatch_fast_download, detect_platform
+from engines.base import cleanup_orphaned_temp_files
 
 # Antrean pesan untuk thread safety
 ui_queue = queue.Queue()
@@ -216,6 +217,9 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
         "--js-runtimes", f"node:{NODE_PATH}",
         "--impersonate", "chrome"
     ]
+    proxy_val = load_proxy()
+    if proxy_val:
+        info_options.extend(["--proxy", proxy_val])
     if browser_cookie and browser_cookie.lower() != "tidak ada":
         info_options.extend(["--cookies-from-browser", browser_cookie.lower()])
     info_command = create_yt_dlp_command(url, options=info_options)
@@ -581,9 +585,12 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
                 abort_checker=is_abort_requested
             )
             if fast_success:
+                cleanup_orphaned_temp_files(output_dir)
+                ui_queue.put({"type": "download_success_meta", "url": url, "output_dir": output_dir})
                 ui_queue.put({"type": "download_finish"})
                 return
             elif is_abort_requested():
+                cleanup_orphaned_temp_files(output_dir)
                 ui_queue.put({"type": "download_finish"})
                 return
             else:
@@ -603,6 +610,11 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
         "--embed-metadata"
     ]
     options.append(f"--ffmpeg-location={FFMPEG_PATH}")
+
+    proxy_val = load_proxy()
+    if proxy_val:
+        options.extend(["--proxy", proxy_val])
+        ui_queue.put({"type": "log", "text": f"[OPT] Menggunakan Proxy: {proxy_val}\n"})
     
     if browser_cookie and browser_cookie.lower() != "tidak ada":
         options.extend(["--cookies-from-browser", browser_cookie.lower()])
@@ -763,6 +775,8 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
             ui_queue.put({"type": "log", "text": "\n\n--- UNDUHAN SUKSES ---\n"})
             if download_subs or embed_subs:
                 process_downloaded_subtitles(output_dir, download_start_time, mode == "audio_only", embed_subs, download_subs)
+            cleanup_orphaned_temp_files(output_dir)
+            ui_queue.put({"type": "download_success_meta", "url": url, "output_dir": output_dir, "start_time": download_start_time})
         elif current_process is None:
             # Unduhan dibatalkan pengguna
             pass
@@ -878,16 +892,20 @@ def update_ytdlp_logic(channel: str = "stable"):
     else:
         ui_queue.put({"type": "log", "text": f"\nMemulai pengunduhan yt-dlp ({channel_title})...\n"})
 
-    temp_path = YT_DLP_PATH + ".new"
+    target_exe = get_ytdlp_update_dest()
+    temp_path = target_exe + ".new"
+    old_path = target_exe + ".old"
     
     try:
-        bin_dir = os.path.dirname(YT_DLP_PATH)
+        bin_dir = os.path.dirname(target_exe)
         if not os.path.exists(bin_dir):
             os.makedirs(bin_dir, exist_ok=True)
             
-        ui_queue.put({"type": "log", "text": "Mengunduh file yt-dlp.exe...\n"})
+        ui_queue.put({"type": "log", "text": f"Mengunduh file yt-dlp.exe ke {target_exe}...\n"})
         
-        response = requests.get(url, stream=True, timeout=30)
+        proxy_val = load_proxy()
+        proxies = {"http": proxy_val, "https": proxy_val} if proxy_val else None
+        response = requests.get(url, stream=True, timeout=30, proxies=proxies)
         response.raise_for_status()
         
         total_length = response.headers.get('content-length')
@@ -903,15 +921,19 @@ def update_ytdlp_logic(channel: str = "stable"):
                         percent = dl / total_length
                         ui_queue.put({"type": "progress", "value": percent, "text": f"Updating: {int(percent*100)}%"})
                         
-        if os.path.exists(YT_DLP_PATH):
+        if os.path.exists(target_exe):
             if os.path.exists(old_path):
                 try:
                     os.remove(old_path)
                 except Exception:
                     pass
-            os.rename(YT_DLP_PATH, old_path)
+            try:
+                os.rename(target_exe, old_path)
+            except Exception:
+                pass
             
-        os.rename(temp_path, YT_DLP_PATH)
+        os.rename(temp_path, target_exe)
+        refresh_binary_paths()
         if os.path.exists(old_path):
             try:
                 os.remove(old_path)
@@ -927,9 +949,10 @@ def update_ytdlp_logic(channel: str = "stable"):
                 os.remove(temp_path)
             except Exception:
                 pass
-        if not os.path.exists(YT_DLP_PATH) and os.path.exists(old_path):
+        if not os.path.exists(target_exe) and os.path.exists(old_path):
             try:
-                os.rename(old_path, YT_DLP_PATH)
+                os.rename(old_path, target_exe)
+                refresh_binary_paths()
             except Exception:
                 pass
     finally:

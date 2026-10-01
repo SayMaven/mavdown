@@ -699,4 +699,35 @@ def embed_thumbnail_to_media(
 
     return False
 
+def cleanup_orphaned_temp_files(output_dir: str, max_age_seconds: int = 600) -> int:
+    """
+    Membersihkan sisa file sementara (.tmp, .remux.mp4, .transcode.*)
+    yang mungkin tertinggal di folder output jika proses unduh sebelumnya terhenti mendadak.
+    """
+    if not output_dir or not os.path.exists(output_dir):
+        return 0
+
+    removed = 0
+    now = time.time()
+    temp_suffixes = ('.tmp', '.remux.mp4', '.transcode.mp4', '.transcode.mkv',
+                     '.thumb_dl.tmp', '.thumb_cover.jpg', '.part', '.ytdl')
+
+    try:
+        for fname in os.listdir(output_dir):
+            if any(fname.lower().endswith(sfx) for sfx in temp_suffixes):
+                fpath = os.path.join(output_dir, fname)
+                try:
+                    if os.path.isfile(fpath):
+                        mtime = os.path.getmtime(fpath)
+                        if now - mtime > max_age_seconds:
+                            os.remove(fpath)
+                            removed += 1
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    return removed
+
+
 

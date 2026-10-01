@@ -12,7 +12,8 @@ from tkinter import filedialog
 from config import (
     BASE_DIR, DEFAULT_OUTPUT_DIR, load_config, save_config,
     load_browser_cookie, load_preferences, save_preferences, is_aria2_available,
-    load_ytdlp_channel, save_ytdlp_channel
+    load_ytdlp_channel, save_ytdlp_channel, load_proxy, save_proxy,
+    load_clipboard_monitor, save_clipboard_monitor
 )
 from downloader import (
     ui_queue, get_video_info, download_video_logic,
@@ -25,8 +26,10 @@ from ui.constants import (
 from ui.sidebar import build_sidebar
 from ui.studio_view import build_studio_view
 from ui.queue_view import build_queue_view
+from ui.history_view import build_history_view, refresh_history_view
 from ui.log_view import build_log_view
 from ui.settings_view import build_settings_view
+from history import add_history_entry
 
 class App(ctk.CTk):
     def __init__(self):
@@ -61,23 +64,28 @@ class App(ctk.CTk):
         self.embed_thumb_var = ctk.BooleanVar(value=True)
         self.use_aria2_var = ctk.BooleanVar(value=is_aria2_available())
         self.download_playlist_var = ctk.BooleanVar(value=False)
+        self.proxy_var = ctk.StringVar(value=load_proxy())
+        self.clipboard_monitor_var = ctk.BooleanVar(value=load_clipboard_monitor())
 
         # ── Runtime State ────────────────────────────────────────────────────
         self.last_video_info: dict = {}
         self._last_log_text: str = ""
         self._settings_window = None
         self._active_thumb_image = None
+        self._history_thumb_refs: dict = {}
         self._active_toast = None
         self._current_active_view: str = "studio"
         self._queue_done_event = threading.Event()
         self._queue_running: bool = False
         self._queue_items = []
         self._prefs_loading: bool = False
+        self._last_clipboard_seen: str = ""
 
         self.setup_ui()
         self._load_and_apply_preferences()
         self._setup_pref_traces()
         self.after(100, self.process_ui_queue)
+        self.after(1500, self._check_clipboard_daemon)
 
     # =========================================================================
     # UI Setup
@@ -200,6 +208,7 @@ class App(ctk.CTk):
         # Build subviews
         self.studio_view = build_studio_view(self, self.views_container)
         self.queue_view = build_queue_view(self, self.views_container)
+        self.history_view = build_history_view(self, self.views_container)
         self.log_view = build_log_view(self, self.views_container)
         self.settings_view_frame = build_settings_view(self, self.views_container)
 
@@ -212,6 +221,7 @@ class App(ctk.CTk):
     def show_studio_view(self):
         self._switch_nav_active("studio")
         self.queue_view.pack_forget()
+        self.history_view.pack_forget()
         self.log_view.pack_forget()
         self.settings_view_frame.pack_forget()
         self.studio_view.pack(fill="both", expand=True)
@@ -219,14 +229,25 @@ class App(ctk.CTk):
     def show_queue_view(self):
         self._switch_nav_active("queue")
         self.studio_view.pack_forget()
+        self.history_view.pack_forget()
         self.log_view.pack_forget()
         self.settings_view_frame.pack_forget()
         self.queue_view.pack(fill="both", expand=True)
+
+    def show_history_view(self):
+        self._switch_nav_active("history")
+        self.studio_view.pack_forget()
+        self.queue_view.pack_forget()
+        self.log_view.pack_forget()
+        self.settings_view_frame.pack_forget()
+        self.history_view.pack(fill="both", expand=True)
+        refresh_history_view(self)
 
     def show_log_view(self):
         self._switch_nav_active("log")
         self.studio_view.pack_forget()
         self.queue_view.pack_forget()
+        self.history_view.pack_forget()
         self.settings_view_frame.pack_forget()
         self.log_view.pack(fill="both", expand=True)
 
@@ -234,6 +255,7 @@ class App(ctk.CTk):
         self._switch_nav_active("settings")
         self.studio_view.pack_forget()
         self.queue_view.pack_forget()
+        self.history_view.pack_forget()
         self.log_view.pack_forget()
         self.settings_view_frame.pack(fill="both", expand=True)
 
@@ -304,6 +326,87 @@ class App(ctk.CTk):
 
                     elif msg_type == "info_data":
                         self._on_info_data(msg["data"])
+
+                    elif msg_type == "download_success_meta":
+                        try:
+                            meta = getattr(self, 'last_video_info', {}) or {}
+                            url = msg.get("url") or meta.get("url", "") or self.url_entry.get().strip()
+                            out_dir = msg.get("output_dir") or self.custom_output_path_var.get() or DEFAULT_OUTPUT_DIR
+
+                            newest_path = ""
+                            newest_mtime = 0
+                            if os.path.exists(out_dir):
+                                for item in os.listdir(out_dir):
+                                    item_path = os.path.join(out_dir, item)
+                                    if not item.endswith(('.tmp', '.part', '.ytdl', '.old', '.new')):
+                                        try:
+                                            mt = os.path.getmtime(item_path)
+                                            if mt > newest_mtime:
+                                                newest_mtime = mt
+                                                newest_path = item_path
+                                        except Exception:
+                                            pass
+
+                            title = meta.get("title") or (os.path.splitext(os.path.basename(newest_path))[0] if newest_path else "Media Unduhan")
+
+                            # Deteksi Platform secara akurat dari URL atau metadata
+                            platform = meta.get("platform") or ""
+                            if not platform or platform.lower() in ("web", "generic", "fast engine"):
+                                for pattern, label, _ in PLATFORM_PATTERNS:
+                                    if re.search(pattern, url, re.IGNORECASE):
+                                        platform = label
+                                        break
+                            if not platform:
+                                platform = "Web"
+
+                            is_slide = meta.get("is_slide", False) or (os.path.isdir(newest_path) if newest_path else False)
+
+                            # Ekstraksi kreator / uploader
+                            author = meta.get("uploader") or meta.get("channel") or meta.get("author") or meta.get("uploader_id", "")
+                            if author.lower() in ('douyin user', 'douyinuser', 'user', 'none', 'douyin video', 'kreator douyin', 'akun douyin', 'tiktok user', 'instagram user', 'facebook user'):
+                                author = ""
+
+                            # Ekstraksi resolusi
+                            resolution = meta.get("resolution_label") or meta.get("resolution") or ""
+                            if not resolution and meta.get("width") and meta.get("height"):
+                                resolution = f"{meta.get('width')}x{meta.get('height')}"
+
+                            # Ekstraksi durasi
+                            duration = meta.get("duration_string") or ""
+                            if not duration and meta.get("duration"):
+                                d_val = meta.get("duration")
+                                if isinstance(d_val, (int, float)):
+                                    m, s = divmod(int(d_val), 60)
+                                    h, m = divmod(m, 60)
+                                    duration = f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+                                else:
+                                    duration = str(d_val)
+
+                            # Ekstraksi format media
+                            media_fmt = ""
+                            if newest_path:
+                                if is_slide or os.path.isdir(newest_path):
+                                    media_fmt = "SLIDE"
+                                else:
+                                    media_fmt = os.path.splitext(newest_path)[1].lstrip('.').upper()
+
+                            add_history_entry(
+                                title=title,
+                                platform=platform,
+                                file_path=newest_path,
+                                thumbnail=meta.get("thumbnail", ""),
+                                is_slide=is_slide,
+                                duration=duration,
+                                source_url=url,
+                                author=author,
+                                resolution=resolution,
+                                media_format=media_fmt,
+                                slide_count=meta.get("slide_count", 0)
+                            )
+                            if hasattr(self, 'history_scroll') and self.history_scroll.winfo_exists():
+                                refresh_history_view(self)
+                        except Exception as e:
+                            print(f"Error recording download history: {e}")
 
                     elif msg_type == "download_finish":
                         self.download_button.configure(
@@ -712,8 +815,40 @@ class App(ctk.CTk):
             self.show_toast(f"Gagal membaca file: {e}", "error")
 
     # =========================================================================
-    # URL & Platform Detection
+    # URL & Platform Detection & Clipboard Daemon
     # =========================================================================
+    def _check_clipboard_daemon(self):
+        try:
+            if hasattr(self, 'clipboard_monitor_var') and self.clipboard_monitor_var.get():
+                raw = self.clipboard_get()
+                if raw and raw != self._last_clipboard_seen:
+                    self._last_clipboard_seen = raw
+                    m = re.search(r'https?://[^\s"\'<>]+', raw)
+                    if m:
+                        detected_url = m.group(0).rstrip('，。！？!?,;)"\'\r\n')
+                        current_entry_val = self.url_entry.get().strip()
+                        if detected_url != current_entry_val:
+                            # Cek apakah cocok dengan salah satu platform
+                            is_media_url = False
+                            plat_name = "Media"
+                            for pattern, label, _ in PLATFORM_PATTERNS:
+                                if re.search(pattern, detected_url, re.I):
+                                    is_media_url = True
+                                    plat_name = label
+                                    break
+
+                            if is_media_url:
+                                self.url_entry.delete(0, "end")
+                                self.url_entry.insert(0, detected_url)
+                                self._update_platform_badge(detected_url)
+                                self.last_pasted_share_text = raw
+                                self.show_toast(f"Link {plat_name} terdeteksi dari Clipboard!", "info")
+                                self.on_get_info()
+        except Exception:
+            pass
+        finally:
+            self.after(1500, self._check_clipboard_daemon)
+
     def _on_entry_paste(self, event=None):
         try:
             clipboard = self.clipboard_get()

@@ -43,12 +43,15 @@ def get_twitter_info(url: str) -> dict:
         if all_media:
             thumb = all_media[0].get('thumbnail_url') or all_media[0].get('url') or ''
 
+        is_slide = len(all_media) > 1
+        slide_count = len(all_media) if is_slide else 0
         return {
             'title': f"{author}: {text[:80]}",
             'clean_title': text[:100],
             'author': author,
             'thumbnail': thumb,
-            'is_slide': len(all_media) > 1,
+            'is_slide': is_slide,
+            'slide_count': slide_count,
             'media_count': len(all_media),
             'platform': 'Twitter/X'
         }

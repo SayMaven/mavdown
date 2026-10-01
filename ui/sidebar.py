@@ -66,10 +66,11 @@ def build_sidebar(app, parent):
 
     app.nav_btns = {}
     nav_items = [
-        ("studio",   "Studio Unduh",  app.show_studio_view),
-        ("queue",    "Antrean Batch", app.show_queue_view),
-        ("log",      "Konsol Log",    app.show_log_view),
-        ("settings", "Pengaturan",    app.show_settings_view),
+        ("studio",   "Studio Unduh",    app.show_studio_view),
+        ("queue",    "Antrean Batch",   app.show_queue_view),
+        ("history",  "Riwayat Unduh",   app.show_history_view),
+        ("log",      "Konsol Log",      app.show_log_view),
+        ("settings", "Pengaturan",      app.show_settings_view),
     ]
     for key, text, cmd in nav_items:
         btn = ctk.CTkButton(

@@ -10,7 +10,9 @@ from engines.bilibili import get_bilibili_info, download_bilibili
 def detect_platform(url: str) -> str:
     """Deteksi platform berdasarkan pola URL."""
     url_lower = (url or '').lower().strip()
-    if 'tiktok.com' in url_lower:
+    if 'youtube.com' in url_lower or 'youtu.be' in url_lower:
+        return 'youtube'
+    elif 'tiktok.com' in url_lower:
         return 'tiktok'
     elif 'douyin.com' in url_lower or 'iesdouyin.com' in url_lower:
         return 'douyin'
@@ -58,7 +60,7 @@ def dispatch_fast_download(url: str, output_dir: str, ui_queue=None, options=Non
     Mengembalikan True jika sukses, False jika gagal atau harus beralih ke Tier 2 (yt-dlp).
     """
     platform = detect_platform(url)
-    if platform == 'generic':
+    if platform in ('generic', 'youtube'):
         # Bukan platform Tier 1, langsung serahkan ke yt-dlp
         return False
 

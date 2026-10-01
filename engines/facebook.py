@@ -90,6 +90,8 @@ def get_facebook_info(url: str) -> dict:
             'description': raw_desc or clean_title,
             'thumbnail': thumb,
             'is_video': is_video,
+            'is_slide': not is_video,
+            'slide_count': 1 if not is_video else 0,
             'resolution_label': 'HD Reel' if is_video else 'HD Photo',
             'platform': 'Facebook'
         }

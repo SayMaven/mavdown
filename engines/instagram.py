@@ -240,11 +240,13 @@ def get_instagram_info(url: str) -> dict:
             'clean_title': clean_title[:100],
             'author': author,
             'thumbnail': thumb,
-            'is_slide': False,
+            'is_slide': True,
+            'slide_count': 1,
             'is_photo': True,
             'width': 1440,
             'height': 1920,
             'resolution_label': "HD Photo",
+            'duration_string': "1 Foto HD",
             'images': [item['url']],
             'platform': 'Instagram'
         }

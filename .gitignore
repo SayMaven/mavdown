@@ -30,4 +30,4 @@ setup.iss
 build_nuitka.bat
 
 # AI Agent Documentation
-AGENT.md
+AGENTS.md
