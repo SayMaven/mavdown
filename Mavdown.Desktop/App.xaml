@@ -1,0 +1,395 @@
+<Application x:Class="Mavdown.Desktop.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Mavdown.Desktop"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <!-- Mavdown Refined Dark Palette (Harmonious Gatefold Architecture) -->
+        <Color x:Key="BgMaster">#080A10</Color>
+        <Color x:Key="SidebarBg">#0B0D14</Color>
+        <Color x:Key="CardBg">#0E111A</Color>
+        <Color x:Key="CardInner">#141826</Color>
+        <Color x:Key="BorderDark">#171D2C</Color>
+        <Color x:Key="BorderLight">#222A3E</Color>
+        <Color x:Key="AccentIndigo">#6366F1</Color>
+        <Color x:Key="AccentIndigoHover">#4F46E5</Color>
+        <Color x:Key="AccentEmerald">#10B981</Color>
+        <Color x:Key="AccentEmeraldHover">#059669</Color>
+        <Color x:Key="AccentAmber">#D97706</Color>
+        <Color x:Key="AccentAmberHover">#B45309</Color>
+        <Color x:Key="AccentRose">#EF4444</Color>
+        <Color x:Key="AccentRoseHover">#DC2626</Color>
+        <Color x:Key="TextTitle">#F8FAFC</Color>
+        <Color x:Key="TextBody">#E2E8F0</Color>
+        <Color x:Key="TextMuted">#94A3B8</Color>
+        <Color x:Key="TextDim">#64748B</Color>
+        <Color x:Key="TextAccent">#38BDF8</Color>
+
+        <SolidColorBrush x:Key="BrushBgMaster" Color="{StaticResource BgMaster}" />
+        <SolidColorBrush x:Key="BrushSidebarBg" Color="{StaticResource SidebarBg}" />
+        <SolidColorBrush x:Key="BrushCardBg" Color="{StaticResource CardBg}" />
+        <SolidColorBrush x:Key="BrushCardInner" Color="{StaticResource CardInner}" />
+        <SolidColorBrush x:Key="BrushBorderDark" Color="{StaticResource BorderDark}" />
+        <SolidColorBrush x:Key="BrushBorderLight" Color="{StaticResource BorderLight}" />
+        <SolidColorBrush x:Key="BrushAccentIndigo" Color="{StaticResource AccentIndigo}" />
+        <SolidColorBrush x:Key="BrushAccentIndigoHover" Color="{StaticResource AccentIndigoHover}" />
+        <SolidColorBrush x:Key="BrushAccentEmerald" Color="{StaticResource AccentEmerald}" />
+        <SolidColorBrush x:Key="BrushAccentEmeraldHover" Color="{StaticResource AccentEmeraldHover}" />
+        <SolidColorBrush x:Key="BrushAccentAmber" Color="{StaticResource AccentAmber}" />
+        <SolidColorBrush x:Key="BrushAccentRose" Color="{StaticResource AccentRose}" />
+        <SolidColorBrush x:Key="BrushTextTitle" Color="{StaticResource TextTitle}" />
+        <SolidColorBrush x:Key="BrushTextBody" Color="{StaticResource TextBody}" />
+        <SolidColorBrush x:Key="BrushTextMuted" Color="{StaticResource TextMuted}" />
+        <SolidColorBrush x:Key="BrushTextDim" Color="{StaticResource TextDim}" />
+        <SolidColorBrush x:Key="BrushTextAccent" Color="{StaticResource TextAccent}" />
+
+        <!-- Gatefold Harmonious Vertical Gradients (Single Clear Direction: Top-to-Bottom 0,0 -> 0,1) -->
+        <LinearGradientBrush x:Key="BrushGatefoldCardBg" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#121622" Offset="0.0" />
+            <GradientStop Color="#0E111A" Offset="0.6" />
+            <GradientStop Color="#0A0C14" Offset="1.0" />
+        </LinearGradientBrush>
+
+        <LinearGradientBrush x:Key="BrushGatefoldBorder" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#222A3E" Offset="0.0" />
+            <GradientStop Color="#171C2B" Offset="0.5" />
+            <GradientStop Color="#10131E" Offset="1.0" />
+        </LinearGradientBrush>
+
+        <LinearGradientBrush x:Key="BrushGatefoldInner" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#141826" Offset="0.0" />
+            <GradientStop Color="#0D101A" Offset="1.0" />
+        </LinearGradientBrush>
+
+        <SolidColorBrush x:Key="BrushGatefoldInnerBorder" Color="#1B2234" />
+        <SolidColorBrush x:Key="BrushGatefoldSegmentBg" Color="#0A0C14" />
+        <SolidColorBrush x:Key="BrushNavActiveBg" Color="#1E1B4B" />
+        <SolidColorBrush x:Key="BrushNavActiveFg" Color="#818CF8" />
+
+        <!-- Tactile Sand / Matte Grain Noise Texture Brush (Whisper Soft) -->
+        <ImageBrush x:Key="BrushNoiseOverlay" 
+                    ImageSource="Assets/noise.png" 
+                    TileMode="Tile" 
+                    Viewport="0,0,256,256" 
+                    ViewportUnits="Absolute" 
+                    Opacity="0.22" />
+
+        <!-- Clean Standard Button Style -->
+        <Style x:Key="StdButton" TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource BrushGatefoldInner}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextBody}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="14,8" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Opacity" Value="0.88" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="border" Property="Opacity" Value="0.75" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="border" Property="Opacity" Value="0.4" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="IndigoButton" TargetType="Button" BasedOn="{StaticResource StdButton}">
+            <Setter Property="Background" Value="{DynamicResource BrushAccentIndigo}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushAccentForeground}" />
+        </Style>
+
+        <Style x:Key="EmeraldButton" TargetType="Button" BasedOn="{StaticResource StdButton}">
+            <Setter Property="Background" Value="{DynamicResource BrushAccentEmerald}" />
+            <Setter Property="Foreground" Value="#090A10" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+
+        <Style x:Key="AmberButton" TargetType="Button" BasedOn="{StaticResource StdButton}">
+            <Setter Property="Background" Value="{StaticResource BrushAccentAmber}" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+
+        <Style x:Key="RoseButton" TargetType="Button" BasedOn="{StaticResource StdButton}">
+            <Setter Property="Background" Value="#31131E" />
+            <Setter Property="Foreground" Value="#F87171" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+
+        <Style x:Key="GhostButton" TargetType="Button" BasedOn="{StaticResource StdButton}">
+            <Setter Property="Background" Value="{DynamicResource BrushGatefoldInner}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextBody}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+
+        <!-- Pill Badge Style -->
+        <Style x:Key="PillBadge" TargetType="Border">
+            <Setter Property="Background" Value="#1E2032" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+        </Style>
+
+        <!-- Sleek Modern Dark ScrollBar Style -->
+        <Style TargetType="ScrollBar">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Width" Value="8" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="Transparent">
+                            <Track x:Name="PART_Track" IsDirectionReversed="true">
+                                <Track.Thumb>
+                                    <Thumb>
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border Background="{DynamicResource BrushBorderLight}" CornerRadius="4" Margin="1,0" />
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Custom Dark CheckBox Style (Pixel-perfect CustomTkinter parity) -->
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextBody}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="UseLayoutRounding" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <BulletDecorator Background="Transparent" SnapsToDevicePixels="True" UseLayoutRounding="True">
+                            <BulletDecorator.Bullet>
+                                <Border x:Name="border"
+                                        Width="18"
+                                        Height="18"
+                                        Background="{DynamicResource BrushGatefoldSegmentBg}"
+                                        BorderBrush="{DynamicResource BrushBorderDark}"
+                                        BorderThickness="1"
+                                        CornerRadius="5"
+                                        SnapsToDevicePixels="True"
+                                        UseLayoutRounding="True">
+                                    <Path x:Name="checkMark"
+                                          Data="M 4.5 9.2 L 7.8 12.5 L 13.5 5.5"
+                                          Stroke="{DynamicResource BrushAccentForeground}"
+                                          StrokeThickness="2"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          SnapsToDevicePixels="True"
+                                          Visibility="Collapsed" />
+                                </Border>
+                            </BulletDecorator.Bullet>
+                            <ContentPresenter Margin="8,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left" RecognizesAccessKey="True" />
+                        </BulletDecorator>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource BrushAccentIndigo}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="{DynamicResource BrushAccentIndigo}" />
+                                <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource BrushAccentIndigo}" />
+                                <Setter TargetName="checkMark" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <SolidColorBrush x:Key="BrushAccentForeground" Color="White" />
+
+        <!-- Segmented Tile RadioButton Style (Matches Tkinter CTkSegmentedButton) -->
+        <Style x:Key="SegmentRadioButton" TargetType="RadioButton">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextBody}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="bd" Background="{DynamicResource BrushGatefoldInner}" CornerRadius="6" Padding="6,4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource BrushCardInner}" />
+                                <Setter Property="Foreground" Value="{DynamicResource BrushTextTitle}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource BrushAccentIndigo}" />
+                                <Setter Property="Foreground" Value="{DynamicResource BrushAccentForeground}" />
+                                <Setter Property="FontWeight" Value="Bold" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Mode Segment Switcher Tab Button -->
+        <Style x:Key="ModeSegmentButton" TargetType="RadioButton">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextBody}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Padding" Value="16,8" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="bd" Background="{DynamicResource BrushGatefoldInner}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource BrushCardInner}" />
+                                <Setter Property="Foreground" Value="{DynamicResource BrushTextTitle}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource BrushAccentIndigo}" />
+                                <Setter Property="Foreground" Value="{DynamicResource BrushAccentForeground}" />
+                                <Setter Property="FontWeight" Value="Bold" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Custom Flat Sleek ProgressBar (No stray dot when Value=0) -->
+        <Style TargetType="ProgressBar">
+            <Setter Property="Height" Value="8" />
+            <Setter Property="Background" Value="{DynamicResource BrushGatefoldSegmentBg}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushAccentEmerald}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ProgressBar">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="4" ClipToBounds="True">
+                            <Grid x:Name="PART_Track">
+                                <Border x:Name="PART_Indicator" Background="{TemplateBinding Foreground}" HorizontalAlignment="Left" CornerRadius="4" />
+                            </Grid>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+
+        <!-- ComboBox ToggleButton Template -->
+        <ControlTemplate x:Key="ComboBoxToggleButton" TargetType="ToggleButton">
+            <Grid>
+                <Border x:Name="Border" 
+                        Background="{DynamicResource BrushGatefoldSegmentBg}" 
+                        BorderBrush="{DynamicResource BrushBorderDark}" 
+                        BorderThickness="1" 
+                        CornerRadius="6" />
+                <Path x:Name="Arrow" 
+                      HorizontalAlignment="Right" 
+                      VerticalAlignment="Center" 
+                      Margin="0,0,12,0" 
+                      Data="M 0 0 L 4 4 L 8 0" 
+                      Stroke="{DynamicResource BrushTextMuted}" 
+                      StrokeThickness="1.5" />
+            </Grid>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="true">
+                    <Setter TargetName="Border" Property="BorderBrush" Value="{DynamicResource BrushAccentIndigo}" />
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <!-- Custom Dark ComboBoxItem Style -->
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="{DynamicResource BrushGatefoldInner}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextBody}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Padding" Value="12,7" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" CornerRadius="4" Margin="2,1">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource BrushGatefoldSegmentBg}" />
+                                <Setter Property="Foreground" Value="{DynamicResource BrushTextTitle}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource BrushAccentIndigo}" />
+                                <Setter Property="Foreground" Value="{DynamicResource BrushAccentForeground}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Custom Dark ComboBox Style -->
+        <Style TargetType="ComboBox">
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextTitle}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="ToggleButton" Template="{StaticResource ComboBoxToggleButton}" Focusable="false" IsChecked="{Binding Path=IsDropDownOpen,Mode=TwoWay,RelativeSource={RelativeSource TemplatedParent}}" ClickMode="Press" />
+                            <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" Margin="12,3,30,3" VerticalAlignment="Center" HorizontalAlignment="Left" />
+                            <Popup x:Name="Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
+                                <Grid x:Name="DropDown" SnapsToDevicePixels="True" MinWidth="{TemplateBinding ActualWidth}" MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                    <Border x:Name="DropDownBorder" 
+                                            Background="{DynamicResource BrushGatefoldInner}" 
+                                            BorderBrush="{DynamicResource BrushGatefoldInnerBorder}" 
+                                            BorderThickness="1" 
+                                            CornerRadius="8" 
+                                            Margin="0,4,0,0">
+                                        <Border.Effect>
+                                            <DropShadowEffect BlurRadius="16" ShadowDepth="4" Direction="270" Color="#000000" Opacity="0.45" />
+                                        </Border.Effect>
+                                        <ScrollViewer Margin="4" SnapsToDevicePixels="True">
+                                            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle" />
+                                        </ScrollViewer>
+                                    </Border>
+                                </Grid>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Application.Resources>
+</Application>

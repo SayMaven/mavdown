@@ -485,7 +485,7 @@ def normalize_image_to_jpeg(file_path: str) -> bool:
     except Exception:
         return False
 
-def probe_media_stream(stream_url: str, timeout: int = 8) -> dict:
+def probe_media_stream(stream_url: str, timeout: int = 8, headers: dict = None) -> dict:
     """
     Mengambil metadata teknis (resolusi, fps, durasi, codec) dari URL stream secara cepat
     menggunakan ffprobe.
@@ -493,12 +493,19 @@ def probe_media_stream(stream_url: str, timeout: int = 8) -> dict:
     if not stream_url or not os.path.exists(FFPROBE_PATH):
         return {}
     cmd = [
-        FFPROBE_PATH, "-v", "error",
+        FFPROBE_PATH, "-v", "error"
+    ]
+    if headers:
+        hdr_lines = "".join(f"{k}: {v}\r\n" for k, v in headers.items())
+        cmd.extend(["-headers", hdr_lines])
+    cmd.extend([
+        "-probesize", "131072",
+        "-analyzeduration", "1000000",
         "-select_streams", "v:0",
         "-show_entries", "stream=width,height,r_frame_rate,duration,codec_name:format=duration",
         "-of", "json",
         stream_url
-    ]
+    ])
     startupinfo = None
     if os.name == 'nt':
         startupinfo = subprocess.STARTUPINFO()

@@ -466,23 +466,40 @@ def get_history_entries(search: str = "", limit: int = 150) -> list:
 
     return entries[:limit]
 
-def delete_history_entry(entry_id: str) -> bool:
+def delete_history_entry(entry_id: str, delete_file: bool = False) -> bool:
     """
     Menghapus satu entri riwayat beserta file thumbnail lokalnya.
+    Jika delete_file bernilai True, file media fisik di disk juga akan dihapus.
     """
     with _history_lock:
         entries = _load_raw_history()
+        target_entry = next((e for e in entries if e.get("id") == entry_id), None)
+        if not target_entry:
+            return False
+
         new_entries = [e for e in entries if e.get("id") != entry_id]
-        if len(new_entries) != len(entries):
-            _save_raw_history(new_entries)
-            thumb_path = os.path.join(THUMBNAILS_DIR, f"{entry_id}.jpg")
-            if os.path.exists(thumb_path):
+        _save_raw_history(new_entries)
+
+        thumb_path = os.path.join(THUMBNAILS_DIR, f"{entry_id}.jpg")
+        if os.path.exists(thumb_path):
+            try:
+                os.remove(thumb_path)
+            except Exception:
+                pass
+
+        if delete_file:
+            fpath = target_entry.get("file_path", "")
+            if fpath:
                 try:
-                    os.remove(thumb_path)
+                    if os.path.isfile(fpath):
+                        os.remove(fpath)
+                    elif os.path.isdir(fpath):
+                        import shutil
+                        shutil.rmtree(fpath, ignore_errors=True)
                 except Exception:
                     pass
-            return True
-    return False
+
+        return True
 
 def clear_all_history() -> bool:
     """

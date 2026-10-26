@@ -34,6 +34,20 @@ def get_tiktok_info(url: str) -> dict:
         title = data.get('title') or 'TikTok Media'
         author = data.get('author', {}).get('nickname') or 'TikTok User'
         thumb = data.get('cover') or data.get('origin_cover') or ''
+        
+        # Kumpulkan kandidat thumbnail cadangan dari server TikTok
+        candidates = []
+        for k in ('cover', 'dynamic_cover', 'origin_cover'):
+            val = data.get(k)
+            if val and isinstance(val, str) and val.startswith('http') and val not in candidates:
+                candidates.append(val)
+        if is_slide and images:
+            for img in images[:3]:
+                if img and isinstance(img, str) and img.startswith('http') and img not in candidates:
+                    candidates.append(img)
+        if thumb and thumb not in candidates:
+            candidates.insert(0, thumb)
+        
         raw_duration = data.get('duration', 0)
         
         is_slide = bool(data.get('images'))
@@ -52,11 +66,25 @@ def get_tiktok_info(url: str) -> dict:
         file_size = data.get('hd_size') or data.get('size', 0)
         formatted_size = f"{file_size / (1024*1024):.1f} MB" if file_size else None
 
+        upload_date = ""
+        date_string = ""
+        create_time = data.get('create_time')
+        if create_time:
+            try:
+                from datetime import datetime, timezone
+                dt = datetime.fromtimestamp(int(create_time), tz=timezone.utc)
+                upload_date = dt.strftime('%Y%m%d')
+                date_string = dt.strftime('%d/%m/%Y')
+            except Exception:
+                pass
+
         info_dict = {
             'title': f"{author} - {title}" if author else title,
             'clean_title': title,
+            'description': title,
             'author': author,
-            'thumbnail': thumb,
+            'thumbnail': candidates[0] if candidates else thumb,
+            'thumbnails': candidates,
             'duration': dur_sec,
             'duration_string': dur_str,
             'is_slide': is_slide,
@@ -70,6 +98,8 @@ def get_tiktok_info(url: str) -> dict:
             'like_count': like_count,
             'comment_count': comment_count,
             'share_count': share_count,
+            'upload_date': upload_date,
+            'date_string': date_string,
             'formatted_size': formatted_size,
             'platform': 'TikTok'
         }
@@ -79,7 +109,7 @@ def get_tiktok_info(url: str) -> dict:
                 'width': 1080,
                 'height': 1920,
                 'resolution_label': 'HD Original',
-                'duration_string': f"{len(images)} Foto Slide"
+                'duration_string': f"{len(images)} Foto"
             })
         elif video_url:
             probe_info = probe_media_stream(video_url, timeout=4)

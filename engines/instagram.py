@@ -134,6 +134,10 @@ def get_instagram_info(url: str) -> dict:
     author = "Instagram User"
     clean_title = "Instagram Media"
     og_thumb = ""
+    like_count = 0
+    comment_count = 0
+    upload_date = ""
+    date_string = ""
 
     # 1. Ekstraksi OpenGraph Metadata untuk Title & Creator yang akurat
     try:
@@ -160,6 +164,33 @@ def get_instagram_info(url: str) -> dict:
                 clean_title = raw_desc.strip()
             elif raw_title:
                 clean_title = raw_title.strip()
+
+            # Parsing engagement metrics dari og:description
+            if raw_desc:
+                likes_m = re.search(r'([\d.,]+)\s*(?:rb|k|m|jt|mil|bil)?\s*(?:likes|suka)', raw_desc, re.I)
+                if likes_m:
+                    val_str = likes_m.group(1).replace('.', '').replace(',', '')
+                    if val_str.isdigit():
+                        like_count = int(val_str)
+                comm_m = re.search(r'([\d.,]+)\s*(?:rb|k|m|jt|mil|bil)?\s*(?:comments|komentar)', raw_desc, re.I)
+                if comm_m:
+                    val_str = comm_m.group(1).replace('.', '').replace(',', '')
+                    if val_str.isdigit():
+                        comment_count = int(val_str)
+
+            # Parsing tanggal postingan
+            date_cand_m = (
+                re.search(r'<meta[^>]+property=["\']article:published_time["\'][^>]+content=["\']([^"\']+)["\']', page_html, re.I) or
+                re.search(r'"uploadDate":\s*"([^"]+)"', page_html, re.I) or
+                re.search(r'"datePublished":\s*"([^"]+)"', page_html, re.I) or
+                re.search(r'datetime="([^"]+)"', page_html, re.I)
+            )
+            if date_cand_m:
+                date_val = date_cand_m.group(1)
+                m_iso = re.search(r'(\d{4})-(\d{2})-(\d{2})', date_val)
+                if m_iso:
+                    upload_date = f"{m_iso.group(1)}{m_iso.group(2)}{m_iso.group(3)}"
+                    date_string = f"{m_iso.group(3)}/{m_iso.group(2)}/{m_iso.group(1)}"
     except Exception:
         pass
 
@@ -174,20 +205,35 @@ def get_instagram_info(url: str) -> dict:
         if len(media_items) > 1:
             slide_count = len(media_items)
             images = [m['url'] for m in media_items]
-            thumb = media_items[0].get('thumbnail') or media_items[0]['url'] or og_thumb
+            slide_thumb_cands = []
+            for m in media_items:
+                for k in ('thumbnail', 'url', 'direct_cdn'):
+                    u = m.get(k)
+                    if u and u.startswith('http') and u not in slide_thumb_cands:
+                        slide_thumb_cands.append(u)
+            if og_thumb and og_thumb not in slide_thumb_cands:
+                slide_thumb_cands.append(og_thumb)
+            thumb = slide_thumb_cands[0] if slide_thumb_cands else (images[0] if images else og_thumb)
+
             return {
                 'title': display_title,
                 'clean_title': clean_title[:100],
+                'description': clean_title,
                 'author': author,
                 'thumbnail': thumb,
+                'thumbnails': slide_thumb_cands,
                 'is_slide': True,
                 'slide_count': slide_count,
                 'media_count': slide_count,
                 'width': 1440,
                 'height': 1920,
                 'resolution_label': "HD Original",
-                'duration_string': f"{slide_count} Foto Slide",
+                'duration_string': f"{slide_count} Foto",
                 'images': images,
+                'like_count': like_count,
+                'comment_count': comment_count,
+                'upload_date': upload_date,
+                'date_string': date_string,
                 'platform': 'Instagram'
             }
 
@@ -195,7 +241,11 @@ def get_instagram_info(url: str) -> dict:
         item = media_items[0]
         if item.get('is_video'):
             video_url = item.get('url')
-            thumb = item.get('thumbnail') or og_thumb
+            vid_thumb_cands = []
+            for cand in [item.get('thumbnail'), item.get('direct_cdn'), og_thumb]:
+                if cand and cand.startswith('http') and cand not in vid_thumb_cands:
+                    vid_thumb_cands.append(cand)
+            thumb = vid_thumb_cands[0] if vid_thumb_cands else og_thumb
 
             # Probe resolusi, durasi, codec video secara cepat
             probe_info = {}
@@ -218,8 +268,10 @@ def get_instagram_info(url: str) -> dict:
             return {
                 'title': display_title,
                 'clean_title': clean_title[:100],
+                'description': clean_title,
                 'author': author,
                 'thumbnail': thumb,
+                'thumbnails': vid_thumb_cands,
                 'is_slide': False,
                 'is_video': True,
                 'video_url': video_url,
@@ -230,16 +282,27 @@ def get_instagram_info(url: str) -> dict:
                 'duration_string': dur_str,
                 'codec': codec,
                 'resolution_label': res_lbl,
+                'like_count': like_count,
+                'comment_count': comment_count,
+                'upload_date': upload_date,
+                'date_string': date_string,
                 'platform': 'Instagram'
             }
 
         # Kasus C: 1 Foto Tunggal
-        thumb = item.get('thumbnail') or item.get('url') or og_thumb
+        photo_thumb_cands = []
+        for cand in [item.get('thumbnail'), item.get('url'), item.get('direct_cdn'), og_thumb]:
+            if cand and cand.startswith('http') and cand not in photo_thumb_cands:
+                photo_thumb_cands.append(cand)
+        thumb = photo_thumb_cands[0] if photo_thumb_cands else og_thumb
+
         return {
             'title': display_title,
             'clean_title': clean_title[:100],
+            'description': clean_title,
             'author': author,
             'thumbnail': thumb,
+            'thumbnails': photo_thumb_cands,
             'is_slide': True,
             'slide_count': 1,
             'is_photo': True,
@@ -248,16 +311,27 @@ def get_instagram_info(url: str) -> dict:
             'resolution_label': "HD Photo",
             'duration_string': "1 Foto HD",
             'images': [item['url']],
+            'like_count': like_count,
+            'comment_count': comment_count,
+            'upload_date': upload_date,
+            'date_string': date_string,
             'platform': 'Instagram'
         }
 
     # Fallback OpenGraph
+    og_cands = [og_thumb] if og_thumb else []
     return {
         'title': display_title,
         'clean_title': clean_title[:100],
+        'description': clean_title,
         'author': author,
         'thumbnail': og_thumb,
+        'thumbnails': og_cands,
         'is_slide': False,
+        'like_count': like_count,
+        'comment_count': comment_count,
+        'upload_date': upload_date,
+        'date_string': date_string,
         'platform': 'Instagram'
     }
 

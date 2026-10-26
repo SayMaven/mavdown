@@ -6,6 +6,8 @@ from engines.base import (
     fast_remux_mp4, extract_audio_from_video, embed_thumbnail_to_media
 )
 
+from datetime import datetime, timezone
+
 def extract_tweet_id(url: str) -> str:
     """Ekstraksi Tweet ID dari URL twitter.com atau x.com."""
     match = re.search(r'(?:twitter|x)\.com\/(?:[^\/]+\/status\/|status\/|i\/status\/)(\d+)', url or '', re.IGNORECASE)
@@ -39,20 +41,111 @@ def get_twitter_info(url: str) -> dict:
         text = target.get('text', 'Twitter Media')
         
         all_media = target.get('media', {}).get('all', [])
-        thumb = ''
-        if all_media:
-            thumb = all_media[0].get('thumbnail_url') or all_media[0].get('url') or ''
+        candidates = []
+        for m in all_media:
+            for k in ('thumbnail_url', 'url'):
+                u = m.get(k)
+                if u and isinstance(u, str) and u.startswith('http') and u not in candidates:
+                    candidates.append(u)
+        thumb = candidates[0] if candidates else ''
 
-        is_slide = len(all_media) > 1
-        slide_count = len(all_media) if is_slide else 0
+        # Metrik engagement
+        view_count = target.get('views', 0) or 0
+        like_count = target.get('likes', 0) or 0
+        retweet_count = target.get('retweets', 0) or 0
+        reply_count = target.get('replies', 0) or 0
+
+        # Tanggal postingan
+        upload_date = ""
+        date_string = ""
+        created_ts = target.get('created_timestamp')
+        if created_ts:
+            try:
+                dt = datetime.fromtimestamp(int(created_ts), tz=timezone.utc)
+                upload_date = dt.strftime('%Y%m%d')
+                date_string = dt.strftime('%d/%m/%Y')
+            except Exception:
+                pass
+
+        # Klasifikasi media & spesifikasi teknis
+        is_slide = False
+        slide_count = 0
+        is_video = False
+        duration = 0
+        dur_str = ""
+        w = 0
+        h = 0
+        fps = 0
+        codec = ""
+        res_lbl = ""
+        video_url = None
+
+        if all_media:
+            first_m = all_media[0]
+            m_type = first_m.get('type')
+            if m_type in ('video', 'gif'):
+                is_video = True
+                dur_float = first_m.get('duration') or 0
+                duration = int(dur_float)
+                if duration:
+                    dur_str = f"{duration // 60:02d}:{duration % 60:02d}"
+                w = first_m.get('width') or 0
+                h = first_m.get('height') or 0
+                fps = 30
+                codec = 'h264'
+
+                max_d = max(w, h) if (w and h) else 0
+                min_d = min(w, h) if (w and h) else 0
+                if max_d >= 1920 or min_d >= 1080:
+                    res_lbl = "1080p FHD"
+                elif max_d >= 1280 or min_d >= 720:
+                    res_lbl = "720p HD"
+                elif max_d >= 480 or min_d >= 480:
+                    res_lbl = "480p"
+                else:
+                    res_lbl = "HD Video"
+
+                if first_m.get('variants'):
+                    mp4_variants = [v for v in first_m['variants'] if v.get('content_type') == 'video/mp4']
+                    if mp4_variants:
+                        mp4_variants.sort(key=lambda x: x.get('bitrate', 0), reverse=True)
+                        video_url = mp4_variants[0].get('url')
+            else:
+                is_slide = len(all_media) > 1
+                slide_count = len(all_media)
+                w = first_m.get('width') or 1200
+                h = first_m.get('height') or 800
+                res_lbl = "HD Original"
+                dur_str = f"{slide_count} Foto" if is_slide else "1 Foto HD"
+
+        clean_title = text.splitlines()[0][:100] if text else 'Twitter Media'
+        display_title = f"{author}: {clean_title}" if author != 'Twitter User' else clean_title
+
         return {
-            'title': f"{author}: {text[:80]}",
-            'clean_title': text[:100],
+            'title': display_title,
+            'clean_title': clean_title,
             'author': author,
             'thumbnail': thumb,
+            'thumbnails': candidates,
             'is_slide': is_slide,
             'slide_count': slide_count,
             'media_count': len(all_media),
+            'is_video': is_video,
+            'video_url': video_url,
+            'duration': duration,
+            'duration_string': dur_str,
+            'width': w,
+            'height': h,
+            'fps': fps,
+            'codec': codec,
+            'resolution_label': res_lbl,
+            'view_count': view_count,
+            'like_count': like_count,
+            'comment_count': reply_count,
+            'share_count': retweet_count,
+            'upload_date': upload_date,
+            'date_string': date_string,
+            'description': text,
             'platform': 'Twitter/X'
         }
     except Exception:

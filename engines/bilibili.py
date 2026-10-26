@@ -82,7 +82,11 @@ def get_bilibili_page_meta(url: str) -> dict:
                     'duration': duration_sec,
                     'duration_string': dur_str,
                     'view_count': stat.get('view', 0),
-                    'like_count': stat.get('like', 0)
+                    'like_count': stat.get('like', 0),
+                    'comment_count': stat.get('reply', 0),
+                    'share_count': stat.get('share', 0),
+                    'pubdate': vdata.get('pubdate'),
+                    'desc': vdata.get('desc', '')
                 }
     except Exception:
         pass
@@ -124,7 +128,17 @@ def get_bilibili_info(url: str) -> dict:
 
     medias = snap_data.get('medias', [])
     m0 = medias[0] if medias else {}
-    thumbnail = page_meta.get('thumbnail') or m0.get('preview_url') or snap_data.get('thumbnail') or ''
+
+    # Kumpulkan kandidat thumbnail cadangan dari server Bilibili
+    candidates = []
+    for cand in [page_meta.get('thumbnail'), m0.get('preview_url'), snap_data.get('thumbnail')]:
+        if cand and isinstance(cand, str):
+            c_clean = cand.strip()
+            if c_clean.startswith('//'):
+                c_clean = 'https:' + c_clean
+            if c_clean.startswith('http') and c_clean not in candidates:
+                candidates.append(c_clean)
+    thumbnail = candidates[0] if candidates else ''
 
     # Durasi
     duration = page_meta.get('duration', 0)
@@ -136,8 +150,30 @@ def get_bilibili_info(url: str) -> dict:
     stats = snap_data.get('stats') or {}
     view_count = page_meta.get('view_count') or stats.get('view_count', 0)
     like_count = page_meta.get('like_count') or stats.get('like_count', 0)
-    comment_count = stats.get('comment_count', 0)
-    share_count = stats.get('share_count', 0)
+    comment_count = page_meta.get('comment_count') or stats.get('comment_count', 0)
+    share_count = page_meta.get('share_count') or stats.get('share_count', 0)
+
+    # Tanggal rilis
+    upload_date = ""
+    date_string = ""
+    pubdate = page_meta.get('pubdate') or snap_data.get('pubdate') or snap_data.get('created_at') or snap_data.get('date')
+    if pubdate:
+        try:
+            if isinstance(pubdate, (int, float)) or (isinstance(pubdate, str) and pubdate.isdigit()):
+                from datetime import datetime, timezone
+                dt = datetime.fromtimestamp(int(pubdate), tz=timezone.utc)
+                upload_date = dt.strftime('%Y%m%d')
+                date_string = dt.strftime('%d/%m/%Y')
+            elif isinstance(pubdate, str):
+                m_iso = re.search(r'(\d{4})-(\d{2})-(\d{2})', pubdate)
+                if m_iso:
+                    upload_date = f"{m_iso.group(1)}{m_iso.group(2)}{m_iso.group(3)}"
+                    date_string = f"{m_iso.group(3)}/{m_iso.group(2)}/{m_iso.group(1)}"
+        except Exception:
+            pass
+
+    # Deskripsi
+    desc = page_meta.get('desc') or snap_data.get('description') or clean_title
 
     # Resolusi & codec dari varian tertinggi
     variants = m0.get('variants', [])
@@ -147,8 +183,31 @@ def get_bilibili_info(url: str) -> dict:
         if not best_variant:
             best_variant = variants[0]
 
+    fps_val = 30
     res_label = best_variant.get('quality_label') if best_variant else "1080p FHD"
     codec = (best_variant.get('video_codec') or 'h264') if best_variant else 'h264'
+
+    # Probing stream video jika durasi belum terdeteksi dari page_meta
+    if not duration and m0:
+        probe_v = None
+        if variants:
+            probe_v = variants[0].get('video_url') or variants[0].get('resource_url')
+        if not probe_v:
+            probe_v = m0.get('preview_url') or m0.get('resource_url')
+        if probe_v:
+            req_headers = {
+                'User-Agent': m0.get('headers', {}).get('User-Agent', DEFAULT_HEADERS['User-Agent']),
+                'Referer': m0.get('headers', {}).get('Referer', 'https://www.bilibili.com/')
+            }
+            p_res = probe_media_stream(probe_v, timeout=4, headers=req_headers)
+            if p_res:
+                if p_res.get('duration'):
+                    duration = int(p_res['duration'])
+                    dur_str = f"{duration // 60}:{duration % 60:02d}"
+                if p_res.get('fps'):
+                    fps_val = p_res['fps']
+                if p_res.get('codec'):
+                    codec = p_res['codec']
 
     w = 1920
     h = 1080
@@ -175,18 +234,22 @@ def get_bilibili_info(url: str) -> dict:
         'clean_title': clean_title,
         'author': author,
         'thumbnail': thumbnail,
+        'thumbnails': candidates,
         'duration': duration,
         'duration_string': dur_str,
         'is_slide': False,
         'width': w,
         'height': h,
-        'fps': 30,
+        'fps': fps_val,
         'codec': codec,
         'resolution_label': res_label,
         'view_count': view_count,
         'like_count': like_count,
         'comment_count': comment_count,
         'share_count': share_count,
+        'upload_date': upload_date,
+        'date_string': date_string,
+        'description': desc,
         'platform': 'Bilibili',
         'webpage_url': target_url
     }

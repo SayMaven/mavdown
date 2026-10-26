@@ -4,7 +4,8 @@ import html as html_lib
 import requests
 from engines.base import (
     DEFAULT_HEADERS, sanitize_filename, stream_download_file,
-    fast_remux_mp4, extract_audio_from_video, embed_thumbnail_to_media
+    fast_remux_mp4, extract_audio_from_video, embed_thumbnail_to_media,
+    probe_media_stream
 )
 
 def extract_meta_content(html_text: str, prop: str) -> str:
@@ -69,12 +70,25 @@ def get_pinterest_info(url: str) -> dict:
 
         # Base Image / Thumbnail
         base_img = extract_meta_content(html_text, 'og:image') or extract_meta_content(html_text, 'twitter:image')
-        if not base_img:
-            preload_m = re.search(r'<link[^>]+id=["\']pin-image-preload["\'][^>]+href=["\']([^"\']+)["\']', html_text)
-            if preload_m:
-                base_img = preload_m.group(1)
+        preload_img = ''
+        preload_m = re.search(r'<link[^>]+id=["\']pin-image-preload["\'][^>]+href=["\']([^"\']+)["\']', html_text)
+        if preload_m:
+            preload_img = preload_m.group(1).strip()
+        if not base_img and preload_img:
+            base_img = preload_img
 
-        thumb = base_img or ''
+        # Kumpulkan kandidat thumbnail cadangan (prioritaskan resolusi asli /originals/)
+        candidates = []
+        if base_img:
+            orig_candidate = re.sub(r'\/(?:236x|474x|736x)\/', '/originals/', base_img)
+            if orig_candidate and orig_candidate not in candidates:
+                candidates.append(orig_candidate)
+            if base_img not in candidates:
+                candidates.append(base_img)
+        if preload_img and preload_img not in candidates:
+            candidates.append(preload_img)
+
+        thumb = candidates[0] if candidates else (base_img or '')
 
         # Deteksi Video
         video_url = extract_meta_content(html_text, 'og:video') or extract_meta_content(html_text, 'og:video:secure_url')
@@ -87,13 +101,76 @@ def get_pinterest_info(url: str) -> dict:
 
         is_video = bool(video_url)
 
-        # Resolusi & Dimensi
+        # Resolusi & Dimensi dasar
         w_str = extract_meta_content(html_text, 'og:image:width')
         h_str = extract_meta_content(html_text, 'og:image:height')
         width = int(w_str) if w_str and w_str.isdigit() else 0
         height = int(h_str) if h_str and h_str.isdigit() else 0
 
-        res_lbl = f"{width}x{height}" if width and height else ("HD Video" if is_video else "HD Image")
+        duration = 0
+        dur_str = ""
+        fps = 0
+        codec = ""
+        res_lbl = ""
+
+        # Jika konten berupa video, probe stream untuk mendapatkan durasi dan codec akurat
+        if is_video and video_url:
+            meta = probe_media_stream(video_url, timeout=5)
+            if meta:
+                width = meta.get('width') or width
+                height = meta.get('height') or height
+                fps = meta.get('fps') or 30
+                codec = meta.get('codec') or 'h264'
+                dur_float = meta.get('duration') or 0
+                duration = int(dur_float)
+                if duration:
+                    dur_str = f"{duration // 60:02d}:{duration % 60:02d}"
+                res_lbl = meta.get('resolution_label') or ''
+
+        if not res_lbl:
+            max_d = max(width, height) if (width and height) else 0
+            min_d = min(width, height) if (width and height) else 0
+            if max_d >= 1920 or min_d >= 1080:
+                res_lbl = "1080p FHD"
+            elif max_d >= 1280 or min_d >= 720:
+                res_lbl = "720p HD"
+            elif max_d >= 480 or min_d >= 480:
+                res_lbl = "480p"
+            else:
+                res_lbl = "HD Video" if is_video else "HD Original"
+
+        # Tanggal postingan
+        upload_date = ""
+        date_string = ""
+        date_cand = (
+            extract_meta_content(html_text, 'og:updated_time') or
+            extract_meta_content(html_text, 'article:published_time')
+        )
+        if not date_cand:
+            dp_m = re.search(r'"datePublished":\s*"([^"]+)"', html_text) or re.search(r'"created_at":\s*"([^"]+)"', html_text)
+            if dp_m:
+                date_cand = dp_m.group(1)
+
+        if date_cand:
+            try:
+                m_iso = re.search(r'(\d{4})-(\d{2})-(\d{2})', date_cand)
+                if m_iso:
+                    upload_date = f"{m_iso.group(1)}{m_iso.group(2)}{m_iso.group(3)}"
+                    date_string = f"{m_iso.group(3)}/{m_iso.group(2)}/{m_iso.group(1)}"
+            except Exception:
+                pass
+
+        # Metrik engagement (Saves & Reactions)
+        view_count = 0
+        like_count = 0
+        saves_m = re.search(r'"repin_count":\s*(\d+)', html_text) or re.search(r'"save_count":\s*(\d+)', html_text) or re.search(r'"saves":\s*(\d+)', html_text)
+        if saves_m:
+            view_count = int(saves_m.group(1))
+
+        react_m = re.search(r'"reaction_counts":\s*\{[^}]*"1":\s*(\d+)', html_text) or re.search(r'"like_count":\s*(\d+)', html_text)
+        if react_m:
+            like_count = int(react_m.group(1))
+
         desc = extract_meta_content(html_text, 'og:description') or ''
 
         return {
@@ -101,20 +178,25 @@ def get_pinterest_info(url: str) -> dict:
             'clean_title': clean_title,
             'author': author,
             'thumbnail': thumb,
-            'duration': 0,
-            'duration_string': '',
+            'thumbnails': candidates,
+            'duration': duration,
+            'duration_string': dur_str if is_video else "1 Foto HD",
             'is_slide': not is_video,
             'slide_count': 1 if not is_video else 0,
             'media_count': 1,
-            'has_audio': False,
+            'has_audio': is_video,
             'width': width or (736 if not is_video else 1080),
             'height': height or (981 if not is_video else 1920),
-            'fps': 30 if is_video else 0,
-            'codec': 'h264' if is_video else '',
+            'fps': fps if is_video else 0,
+            'codec': codec if is_video else '',
             'resolution_label': res_lbl,
+            'view_count': view_count,
+            'like_count': like_count,
+            'upload_date': upload_date,
+            'date_string': date_string,
             'platform': 'Pinterest',
             'webpage_url': canonical_url,
-            'description': desc,
+            'description': desc or clean_title,
             'is_video': is_video
         }
     except Exception:

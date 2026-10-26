@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import unittest
 import tempfile
@@ -150,7 +151,20 @@ class TestMavdownCore(unittest.TestCase):
             self.assertEqual(len(get_history_entries(search="tiktok")), 1)
             self.assertEqual(len(get_history_entries(search="youtube")), 0)
 
-            # Uji hapus per-item
+            # Uji hapus per-item (dengan dan tanpa delete_file)
+            dummy_file = os.path.join(temp_dir, "dummy.mp4")
+            with open(dummy_file, "w") as f:
+                f.write("test")
+            entry2 = add_history_entry(
+                source_url="https://youtube.com/watch?v=123",
+                title="Video YouTube",
+                platform="YouTube",
+                file_path=dummy_file
+            )
+            self.assertTrue(os.path.exists(dummy_file))
+            delete_history_entry(entry2["id"], delete_file=True)
+            self.assertFalse(os.path.exists(dummy_file))
+
             delete_history_entry(entry1["id"])
             self.assertEqual(len(get_history_entries()), 0)
         finally:
@@ -215,5 +229,46 @@ class TestMavdownCore(unittest.TestCase):
         self.assertEqual(default_batch_fmt, "gif")
         self.assertNotEqual(default_batch_fmt, "mp4")
 
+    def test_mav_core_ipc(self):
+        """Uji protokol IPC mav_core daemon (ready, ping, detect_platform, config, exit)."""
+        import subprocess
+        proc = subprocess.Popen(
+            [sys.executable, 'mav_core.py', '--daemon'],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding='utf-8'
+        )
+        ready_raw = proc.stdout.readline()
+        ready_data = json.loads(ready_raw)
+        self.assertEqual(ready_data.get("event"), "ready")
+
+        # Test ping
+        proc.stdin.write(json.dumps({"action": "ping", "id": "t1"}) + "\n")
+        proc.stdin.flush()
+        pong_data = json.loads(proc.stdout.readline())
+        self.assertEqual(pong_data.get("event"), "pong")
+        self.assertEqual(pong_data.get("id"), "t1")
+
+        # Test detect_platform
+        proc.stdin.write(json.dumps({"action": "detect_platform", "url": "https://v.douyin.com/abc/"}) + "\n")
+        proc.stdin.flush()
+        plat_data = json.loads(proc.stdout.readline())
+        self.assertEqual(plat_data.get("event"), "platform_detected")
+        self.assertEqual(plat_data.get("platform"), "douyin")
+
+        # Test exit
+        proc.stdin.write(json.dumps({"action": "exit"}) + "\n")
+        proc.stdin.flush()
+        exit_data = json.loads(proc.stdout.readline())
+        self.assertEqual(exit_data.get("event"), "shutting_down")
+        proc.wait(timeout=5)
+        proc.stdin.close()
+        proc.stdout.close()
+        proc.stderr.close()
+        self.assertEqual(proc.returncode, 0)
+
 if __name__ == '__main__':
     unittest.main()
+

@@ -4,6 +4,7 @@ import json
 import base64
 import html
 import requests
+import concurrent.futures
 from engines.base import (
     DEFAULT_HEADERS, sanitize_filename, stream_download_file,
     fast_remux_mp4, extract_audio_from_video, normalize_image_to_jpeg,
@@ -159,7 +160,7 @@ def try_snapdouyin_engine(url: str, timeout: int = 6) -> dict:
                     best_vid = v
             resolved_video = resolve_snapdouyin_url(session, best_vid.get('url'))
             
-            meta = probe_media_stream(resolved_video) if resolved_video else {}
+            meta = probe_media_stream(resolved_video, timeout=3) if resolved_video else {}
             w = meta.get('width')
             h = meta.get('height')
             fps = meta.get('fps')
@@ -348,6 +349,11 @@ def try_tikwm_douyin(url: str, timeout: int = 15) -> dict:
                         'thumbnail': thumbnail,
                         'images': data['images'],
                         'audio_url': data.get('music'),
+                        'create_time': data.get('create_time'),
+                        'view_count': data.get('play_count', 0),
+                        'like_count': data.get('digg_count', 0),
+                        'comment_count': data.get('comment_count', 0),
+                        'share_count': data.get('share_count', 0),
                         'engine': 'TikWM Douyin'
                     }
                 v_url = data.get('hdplay') or data.get('play')
@@ -359,6 +365,11 @@ def try_tikwm_douyin(url: str, timeout: int = 15) -> dict:
                         'thumbnail': thumbnail,
                         'video_url': v_url,
                         'audio_url': data.get('music'),
+                        'create_time': data.get('create_time'),
+                        'view_count': data.get('play_count', 0),
+                        'like_count': data.get('digg_count', 0),
+                        'comment_count': data.get('comment_count', 0),
+                        'share_count': data.get('share_count', 0),
                         'engine': 'TikWM Douyin'
                     }
     except Exception:
@@ -385,6 +396,12 @@ def try_aweme_api(url: str, timeout: int = 10) -> dict:
                 title = item.get('desc') or ''
                 raw_author = item.get('author', {}).get('nickname') or ''
                 author = '' if raw_author.lower() in ('douyin user', 'douyinuser', 'user', 'none', '') else raw_author
+                stats = item.get('statistics', {})
+                create_time = item.get('create_time')
+                v_count = stats.get('play_count', 0)
+                l_count = stats.get('digg_count', 0)
+                c_count = stats.get('comment_count', 0)
+                s_count = stats.get('share_count', 0)
                 
                 if item.get('images'):
                     img_list = []
@@ -398,6 +415,11 @@ def try_aweme_api(url: str, timeout: int = 10) -> dict:
                             'title': title,
                             'author': author,
                             'images': img_list,
+                            'create_time': create_time,
+                            'view_count': v_count,
+                            'like_count': l_count,
+                            'comment_count': c_count,
+                            'share_count': s_count,
                             'engine': 'Aweme Direct API'
                         }
                         
@@ -409,6 +431,11 @@ def try_aweme_api(url: str, timeout: int = 10) -> dict:
                         'title': title,
                         'author': author,
                         'video_url': clean_play_url,
+                        'create_time': create_time,
+                        'view_count': v_count,
+                        'like_count': l_count,
+                        'comment_count': c_count,
+                        'share_count': s_count,
                         'engine': 'Aweme Direct API'
                     }
     except Exception:
@@ -427,29 +454,36 @@ def get_douyin_info(url: str, share_text: str = None) -> dict:
     data = None
     cloud_data = None
 
+    snap_data = None
     if is_note_url:
         # Note album slide tidak didukung SnapDouyin, langsung utamakan Cloud Engine
-        cloud_data = try_douyin_cloud_engine(canonical, original_url=clean_url or url, timeout=10)
+        cloud_data = try_douyin_cloud_engine(canonical, original_url=clean_url or url, timeout=8)
         data = cloud_data
     else:
-        # 1. Coba SnapDouyin (UHD 4K/2K/1080p Engine)
-        data = try_snapdouyin_engine(canonical, timeout=6)
+        # Jalankan SnapDouyin dan Cloud Engine secara paralel:
+        # - SnapDouyin mengambil cover kurasi kreator (sc=cover / image-cut-tos-priv) dan stream 2K/4K UHD
+        # - Cloud Engine mengambil caption judul lengkap dan CDN cepat
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                fut_snap = executor.submit(try_snapdouyin_engine, canonical, 10)
+                fut_cloud = executor.submit(try_douyin_cloud_engine, canonical, clean_url or url, 8)
+                snap_data = fut_snap.result()
+                cloud_data = fut_cloud.result()
+        except Exception:
+            if not snap_data:
+                try:
+                    snap_data = try_snapdouyin_engine(canonical, timeout=10)
+                except Exception:
+                    pass
+            if not cloud_data:
+                try:
+                    cloud_data = try_douyin_cloud_engine(canonical, original_url=clean_url or url, timeout=8)
+                except Exception:
+                    pass
 
-        # 2. Coba Cloud Engine jika SnapDouyin gagal, judulnya terpotong (#hashtag pendek),
-        # atau dimensi/resolusi video belum ada
-        need_cloud = (
-            not data
-            or data.get('is_synthetic_title')
-            or not data.get('title')
-            or (data.get('title', '').startswith('#') and len(data.get('title', '')) < 15)
-            or not data.get('width')
-        )
-        if need_cloud:
-            cloud_data = try_douyin_cloud_engine(canonical, original_url=clean_url or url, timeout=10)
-            if not data and cloud_data:
-                data = cloud_data
+        data = snap_data or cloud_data
 
-    # 3. Fallback ke TikWM / Aweme
+    # 3. Fallback ke TikWM / Aweme jika engine utama tidak merespons
     if not data:
         data = try_tikwm_douyin(canonical) or try_aweme_api(canonical)
 
@@ -497,15 +531,68 @@ def get_douyin_info(url: str, share_text: str = None) -> dict:
 
         dur_str = ""
         if is_slide:
-            dur_str = f"{slide_count} Foto Slide"
+            dur_str = f"{slide_count} Foto"
         elif dur:
             m_tot, s_tot = divmod(int(dur), 60)
             h_tot, m_tot = divmod(m_tot, 60)
             dur_str = f"{h_tot}:{m_tot:02d}:{s_tot:02d}" if h_tot else f"{m_tot:02d}:{s_tot:02d}"
 
-        raw_thumb = data.get('thumbnail') or (cloud_data and cloud_data.get('thumbnail')) or ''
-        thumb_clean = html.unescape(raw_thumb) if raw_thumb else (images[0] if images else '')
+        # Kumpulkan semua kandidat thumbnail cadangan dari server Douyin (SnapDouyin, Cloud, TikWM, dsb)
+        thumb_candidates = []
+
+        def add_cand(u):
+            if u and isinstance(u, str):
+                c = html.unescape(u.strip())
+                if c.startswith('//'): c = 'https:' + c
+                if c.startswith('http') and c not in thumb_candidates:
+                    thumb_candidates.append(c)
+
+        if snap_data and snap_data.get('thumbnail'):
+            add_cand(snap_data['thumbnail'])
+        if data and data.get('thumbnail'):
+            add_cand(data['thumbnail'])
+        if cloud_data and cloud_data.get('thumbnail'):
+            add_cand(cloud_data['thumbnail'])
+        if is_slide and images:
+            for img in images[:3]:
+                add_cand(img)
+
+        # Skoring prioritas varian thumbnail Douyin:
+        # 1: sc=cover / image-cut-tos-priv / pcweb_cover (Cover kurasi kreator yang indah & tajam)
+        # 2: dynamic_cover (Cover animasi WebP)
+        # 3: Gambar slide atau URL gambar umum
+        # 4: sc=origin_cover (Frame 0 mentah detik 00:00:00, sering kali hanya layar kosong/langit)
+        def score_douyin_thumb(url_str):
+            u_low = url_str.lower()
+            if 'sc=cover' in u_low or 'image-cut' in u_low or 'pcweb_cover' in u_low:
+                return 1
+            if 'dynamic_cover' in u_low:
+                return 2
+            if 'sc=origin_cover' in u_low:
+                return 4
+            return 3
+
+        thumb_candidates.sort(key=score_douyin_thumb)
+        thumb_clean = thumb_candidates[0] if thumb_candidates else (images[0] if images else '')
         fmt_size = data.get('formatted_size') or (cloud_data and cloud_data.get('formatted_size'))
+
+        # Metrik engagement & tanggal
+        view_count = data.get('view_count') or (cloud_data and cloud_data.get('view_count')) or 0
+        like_count = data.get('like_count') or (cloud_data and cloud_data.get('like_count')) or 0
+        comment_count = data.get('comment_count') or (cloud_data and cloud_data.get('comment_count')) or 0
+        share_count = data.get('share_count') or (cloud_data and cloud_data.get('share_count')) or 0
+
+        create_time = data.get('create_time') or (cloud_data and cloud_data.get('create_time'))
+        upload_date = ""
+        date_string = ""
+        if create_time:
+            try:
+                from datetime import datetime, timezone
+                dt = datetime.fromtimestamp(int(create_time), tz=timezone.utc)
+                upload_date = dt.strftime('%Y%m%d')
+                date_string = dt.strftime('%d/%m/%Y')
+            except Exception:
+                pass
 
         return {
             'title': display_title,
@@ -513,6 +600,7 @@ def get_douyin_info(url: str, share_text: str = None) -> dict:
             'description': title,
             'author': author,
             'thumbnail': thumb_clean,
+            'thumbnails': thumb_candidates,
             'is_slide': is_slide,
             'slide_count': slide_count,
             'has_audio': bool(data.get('audio_url') or (cloud_data and cloud_data.get('audio_url')) or data.get('video_url')),
@@ -524,6 +612,12 @@ def get_douyin_info(url: str, share_text: str = None) -> dict:
             'duration_string': dur_str,
             'codec': codec,
             'resolution_label': res_label,
+            'view_count': view_count,
+            'like_count': like_count,
+            'comment_count': comment_count,
+            'share_count': share_count,
+            'upload_date': upload_date,
+            'date_string': date_string,
             'formatted_size': fmt_size,
             'webpage_url': canonical,
             'url': canonical,

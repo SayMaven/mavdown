@@ -1,8 +1,8 @@
 # ---------------------------------------------------------------------------
-# MAVDOWN UI CONSTANTS & PALETTES (v1.2.1)
+# MAVDOWN UI CONSTANTS & PALETTES (v1.3.0)
 # ---------------------------------------------------------------------------
 
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.3.0"
 APP_TITLE = f"Maven Downloader v{APP_VERSION}"
 
 # Pemetaan Bahasa Subtitle / Lirik

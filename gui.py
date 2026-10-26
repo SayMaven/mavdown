@@ -1,5 +1,5 @@
 """
-Mavdown GUI Gateway (v1.2.1)
+Mavdown GUI Gateway (v1.3.0)
 Re-exports App from the modular ui/ package.
 """
 from ui import App, APP_VERSION, APP_TITLE

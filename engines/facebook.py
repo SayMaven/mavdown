@@ -5,7 +5,7 @@ import requests
 from engines.base import (
     DEFAULT_HEADERS, sanitize_filename, stream_download_file,
     fast_remux_mp4, extract_audio_from_video, normalize_image_to_jpeg,
-    embed_thumbnail_to_media
+    embed_thumbnail_to_media, probe_media_stream
 )
 
 FB_CRAWLER_HEADERS = {
@@ -40,10 +40,15 @@ def get_facebook_info(url: str) -> dict:
         og_desc = re.search(r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']', page_html) or \
                   re.search(r'<meta\s+name=["\']description["\']\s+content=["\']([^"\']+)["\']', page_html)
         og_img = re.search(r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']', page_html)
+        tw_img = re.search(r'<meta\s+name=["\']twitter:image["\']\s+content=["\']([^"\']+)["\']', page_html)
 
-        raw_title = html.unescape(og_title.group(1)).strip() if og_title else ''
-        raw_desc = html.unescape(og_desc.group(1)).strip() if og_desc else ''
-        thumb = html.unescape(og_img.group(1)).strip() if og_img else ''
+        candidates = []
+        for im in (og_img, tw_img):
+            if im:
+                u = html.unescape(im.group(1)).strip()
+                if u.startswith('http') and u not in candidates:
+                    candidates.append(u)
+        thumb = candidates[0] if candidates else ''
 
         title = ''
         author = ''
@@ -83,16 +88,100 @@ def get_facebook_info(url: str) -> dict:
 
         clean_title = title.splitlines()[0] if title else 'Facebook Media'
 
+        # Parsing engagement metrics
+        view_count = 0
+        like_count = 0
+        share_count = 0
+        combined_text = f"{raw_title} {raw_desc}"
+        vm = re.search(r'([\d.,]+)\s*(?:rb|k|m|jt|mil|bil)?\s*(?:tayangan|views)', combined_text, re.I)
+        if vm:
+            val_str = vm.group(1).replace('.', '').replace(',', '')
+            if val_str.isdigit(): view_count = int(val_str)
+        lm = re.search(r'([\d.,]+)\s*(?:rb|k|m|jt|mil|bil)?\s*(?:tanggapan|reactions|suka|likes)', combined_text, re.I)
+        if lm:
+            val_str = lm.group(1).replace('.', '').replace(',', '')
+            if val_str.isdigit(): like_count = int(val_str)
+        sm = re.search(r'([\d.,]+)\s*(?:rb|k|m|jt|mil|bil)?\s*(?:dibagikan|shares)', combined_text, re.I)
+        if sm:
+            val_str = sm.group(1).replace('.', '').replace(',', '')
+            if val_str.isdigit(): share_count = int(val_str)
+
+        # Parsing tanggal
+        upload_date = ""
+        date_string = ""
+        date_cand_m = (
+            re.search(r'<meta[^>]+property=["\']article:published_time["\'][^>]+content=["\']([^"\']+)["\']', page_html, re.I) or
+            re.search(r'"publish_time":\s*(\d+)', page_html, re.I) or
+            re.search(r'data-utime="(\d+)"', page_html, re.I)
+        )
+        if date_cand_m:
+            date_val = date_cand_m.group(1)
+            if date_val.isdigit() and len(date_val) >= 9:
+                try:
+                    from datetime import datetime, timezone
+                    dt = datetime.fromtimestamp(int(date_val), tz=timezone.utc)
+                    upload_date = dt.strftime('%Y%m%d')
+                    date_string = dt.strftime('%d/%m/%Y')
+                except Exception:
+                    pass
+            else:
+                m_iso = re.search(r'(\d{4})-(\d{2})-(\d{2})', date_val)
+                if m_iso:
+                    upload_date = f"{m_iso.group(1)}{m_iso.group(2)}{m_iso.group(3)}"
+                    date_string = f"{m_iso.group(3)}/{m_iso.group(2)}/{m_iso.group(1)}"
+
+        # Probing video jika tersedia stream direct
+        duration = 0
+        dur_str = ""
+        w = 0
+        h = 0
+        fps = 0
+        codec = ""
+        res_lbl = "HD Reel" if is_video else "HD Photo"
+        video_url = None
+
+        og_video = re.search(r'<meta\s+property=["\']og:video(?::secure_url)?["\']\s+content=["\']([^"\']+)["\']', page_html)
+        if og_video:
+            video_url = html.unescape(og_video.group(1))
+
+        if is_video and video_url:
+            p_res = probe_media_stream(video_url, timeout=4)
+            if p_res:
+                w = p_res.get('width') or 0
+                h = p_res.get('height') or 0
+                fps = p_res.get('fps') or 30
+                codec = p_res.get('codec') or 'h264'
+                dur_float = p_res.get('duration') or 0
+                duration = int(dur_float)
+                if duration:
+                    dur_str = f"{duration // 60:02d}:{duration % 60:02d}"
+                res_lbl = p_res.get('resolution_label') or "HD Reel"
+
+        display_title = f"{author}: {clean_title}" if author else clean_title
+
         return {
-            'title': clean_title,
+            'title': display_title,
             'clean_title': clean_title,
             'author': author,
             'description': raw_desc or clean_title,
             'thumbnail': thumb,
+            'thumbnails': candidates,
             'is_video': is_video,
+            'video_url': video_url,
             'is_slide': not is_video,
             'slide_count': 1 if not is_video else 0,
-            'resolution_label': 'HD Reel' if is_video else 'HD Photo',
+            'duration': duration,
+            'duration_string': dur_str if is_video else "1 Foto HD",
+            'width': w or (1080 if is_video else 1200),
+            'height': h or (1920 if is_video else 800),
+            'fps': fps or (30 if is_video else 0),
+            'codec': codec or ('h264' if is_video else ''),
+            'resolution_label': res_lbl,
+            'view_count': view_count,
+            'like_count': like_count,
+            'share_count': share_count,
+            'upload_date': upload_date,
+            'date_string': date_string,
             'platform': 'Facebook'
         }
     except Exception:

@@ -49,6 +49,53 @@ def refresh_binary_paths():
     FFPROBE_PATH = _resolve_binary("ffprobe.exe")
     NODE_PATH = _resolve_binary("node.exe")
 
+def get_sanitized_env() -> dict:
+    """
+    Menghasilkan copy os.environ dengan PATH yang disanitasi:
+    1. Memprioritaskan folder bin internal Mavdown (USER_BIN_DIR dan BASE_DIR/bin) di urutan pertama.
+    2. Menyaring junction/reparse point yang tidak terpercaya (seperti scoop\\apps) yang memicu
+       [WinError 448] (STATUS_UNTRUSTED_MOUNT_POINT) di Windows 11 saat proses berjalan di context elevated.
+    3. Memastikan setiap direktori di PATH dapat diakses tanpa memicu OSError.
+    """
+    env = os.environ.copy()
+    raw_path = env.get("PATH", "")
+    paths = raw_path.split(os.pathsep)
+
+    clean_paths = []
+    base_bin = os.path.join(BASE_DIR, "bin")
+
+    if os.path.isdir(USER_BIN_DIR) and USER_BIN_DIR not in clean_paths:
+        clean_paths.append(USER_BIN_DIR)
+    if os.path.isdir(base_bin) and base_bin not in clean_paths:
+        clean_paths.append(base_bin)
+
+    for p in paths:
+        p_clean = p.strip().strip('"')
+        if not p_clean or p_clean in clean_paths:
+            continue
+        p_lower = p_clean.lower()
+        if r"scoop\apps" in p_lower:
+            continue
+        try:
+            os.stat(p_clean)
+            clean_paths.append(p_clean)
+        except OSError:
+            continue
+
+    env["PATH"] = os.pathsep.join(clean_paths)
+    return env
+
+def sanitize_current_process_env():
+    """Terapkan PATH yang bersih ke proses saat ini secara instan."""
+    try:
+        clean_env = get_sanitized_env()
+        os.environ["PATH"] = clean_env.get("PATH", os.environ.get("PATH", ""))
+    except Exception:
+        pass
+
+# Bersihkan environment saat modul config diimpor pertama kali
+sanitize_current_process_env()
+
 def get_ytdlp_update_dest() -> str:
     """Mengembalikan path writeable di User Data untuk menyimpan pembaruan yt-dlp."""
     return os.path.join(USER_BIN_DIR, "yt-dlp.exe")

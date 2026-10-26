@@ -13,7 +13,8 @@ import html
 from config import (
     YT_DLP_PATH, ARIA2_PATH, FFMPEG_PATH, NODE_PATH,
     DEFAULT_OUTPUT_DIR, load_proxy, load_organize_by_platform,
-    get_ytdlp_update_dest, refresh_binary_paths, load_pixiv_session
+    get_ytdlp_update_dest, refresh_binary_paths, load_pixiv_session,
+    get_sanitized_env
 )
 from engines import (
     resolve_fast_info, dispatch_fast_download, detect_platform,
@@ -178,6 +179,8 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
             clean_meta = {
                 'title': fast_info.get('clean_title', title),
                 'uploader': author_val,
+                'thumbnail': fast_info.get('thumbnail', ''),
+                'thumbnails': fast_info.get('thumbnails', []),
                 'duration': fast_info.get('duration', 0),
                 'duration_string': fast_info.get('duration_string', ''),
                 'width': fast_info.get('width'),
@@ -188,6 +191,10 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
                 'formatted_size': fast_info.get('formatted_size'),
                 'view_count': fast_info.get('view_count', 0),
                 'like_count': fast_info.get('like_count', 0),
+                'comment_count': fast_info.get('comment_count', 0),
+                'share_count': fast_info.get('share_count', 0),
+                'upload_date': fast_info.get('upload_date', ''),
+                'date_string': fast_info.get('date_string', ''),
                 'is_slide': fast_info.get('is_slide', False),
                 'is_ugoira': fast_info.get('is_ugoira', False),
                 'slide_count': fast_info.get('slide_count', 0),
@@ -199,15 +206,38 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
             }
             ui_queue.put({"type": "info_data", "data": clean_meta})
             
-            thumb_url = fast_info.get('thumbnail')
-            if thumb_url and thumb_url.startswith('http'):
-                clean_thumb = html.unescape(thumb_url)
+            # Kumpulkan seluruh kandidat thumbnail cadangan dari server platform
+            raw_candidates = []
+            if isinstance(fast_info.get('thumbnails'), list):
+                raw_candidates.extend(fast_info['thumbnails'])
+            for k in ('thumbnail', 'cover', 'dynamic_cover', 'origin_cover', 'preview_url'):
+                v = fast_info.get(k)
+                if v and isinstance(v, str):
+                    raw_candidates.append(v)
+            if fast_info.get('is_slide') and isinstance(fast_info.get('images'), list):
+                raw_candidates.extend(fast_info['images'][:3])
+
+            clean_candidates = []
+            for u in raw_candidates:
+                if u and isinstance(u, str):
+                    c = html.unescape(u.strip())
+                    if c.startswith('//'):
+                        c = 'https:' + c
+                    if c.startswith('http') and c not in clean_candidates:
+                        clean_candidates.append(c)
+
+            platform_name = str(fast_info.get('platform', '')).lower()
+            thumb_loaded = False
+
+            for cand_url in clean_candidates:
                 try:
-                    platform_name = str(fast_info.get('platform', '')).lower()
-                    is_fb = ('facebook' in clean_thumb or 'fbcdn' in clean_thumb or 'fbsbx' in clean_thumb or platform_name == 'facebook')
-                    is_pixiv = ('pixiv' in clean_thumb or 'pximg' in clean_thumb or platform_name == 'pixiv')
-                    is_douyin = ('douyin' in clean_thumb or platform_name == 'douyin')
-                    is_bilibili = ('bilibili' in clean_thumb or 'hdslb' in clean_thumb or platform_name == 'bilibili')
+                    is_fb = ('facebook' in cand_url or 'fbcdn' in cand_url or 'fbsbx' in cand_url or platform_name == 'facebook')
+                    is_pixiv = ('pixiv' in cand_url or 'pximg' in cand_url or platform_name == 'pixiv')
+                    is_douyin = ('douyin' in cand_url or 'snapsave' in cand_url or 'snapdouyin' in cand_url or platform_name == 'douyin')
+                    is_bilibili = ('bilibili' in cand_url or 'hdslb' in cand_url or platform_name == 'bilibili')
+                    is_tiktok = ('tiktok' in cand_url or 'tikwm' in cand_url or platform_name == 'tiktok')
+                    is_instagram = ('instagram' in cand_url or 'cdninstagram' in cand_url or 'snapcdn' in cand_url or platform_name == 'instagram')
+                    is_pinterest = ('pinterest' in cand_url or 'pinimg' in cand_url or platform_name == 'pinterest')
 
                     headers = {
                         'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)' if is_fb else 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
@@ -223,15 +253,50 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
                         headers['Referer'] = 'https://www.douyin.com/'
                     elif is_bilibili:
                         headers['Referer'] = 'https://www.bilibili.com/'
+                    elif is_tiktok:
+                        headers['Referer'] = 'https://www.tiktok.com/'
+                    elif is_instagram:
+                        headers['Referer'] = 'https://www.instagram.com/'
+                    elif is_pinterest:
+                        headers['Referer'] = 'https://www.pinterest.com/'
 
-                    r_thumb = requests.get(clean_thumb, headers=headers, timeout=10)
+                    r_thumb = requests.get(cand_url, headers=headers, timeout=6)
                     if r_thumb.status_code == 200 and len(r_thumb.content) > 100:
+                        # Validasi integritas gambar dengan Pillow
+                        Image.open(BytesIO(r_thumb.content)).verify()
                         ui_queue.put({"type": "info_thumb_data", "image_data": r_thumb.content})
-                    else:
-                        ui_queue.put({"type": "info_thumb", "text": "Pratinjau media tidak tersedia.", "image": None})
+                        thumb_loaded = True
+                        break
                 except Exception:
-                    ui_queue.put({"type": "info_thumb", "text": "Gagal memuat pratinjau thumbnail.", "image": None})
-            else:
+                    continue
+
+            # Fallback pamungkas: Ekstraksi 1 frame video via ffmpeg jika semua CDN thumbnail server gagal
+            if not thumb_loaded and fast_info.get('video_url'):
+                try:
+                    v_url = fast_info['video_url']
+                    cmd = [
+                        FFMPEG_PATH,
+                        '-ss', '00:00:01',
+                        '-i', v_url,
+                        '-vframes', '1',
+                        '-f', 'image2pipe',
+                        '-vcodec', 'mjpeg',
+                        'pipe:1'
+                    ]
+                    startupinfo = None
+                    if sys.platform == "win32":
+                        startupinfo = subprocess.STARTUPINFO()
+                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                        startupinfo.wShowWindow = subprocess.SW_HIDE
+                    ff_res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5, startupinfo=startupinfo)
+                    if ff_res.returncode == 0 and len(ff_res.stdout) > 500:
+                        Image.open(BytesIO(ff_res.stdout)).verify()
+                        ui_queue.put({"type": "info_thumb_data", "image_data": ff_res.stdout})
+                        thumb_loaded = True
+                except Exception:
+                    pass
+
+            if not thumb_loaded:
                 ui_queue.put({"type": "info_thumb", "text": "Pratinjau media tidak tersedia.", "image": None})
             return
     except Exception:
@@ -240,13 +305,20 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
     info_options = [
         "--skip-download", "--print-json", "--no-playlist", 
         "--js-runtimes", f"node:{NODE_PATH}",
+        "--ffmpeg-location", os.path.dirname(FFMPEG_PATH),
+        "--no-config-locations",
         "--impersonate", "chrome"
     ]
     proxy_val = load_proxy()
     if proxy_val:
         info_options.extend(["--proxy", proxy_val])
-    if browser_cookie and browser_cookie.lower() != "tidak ada":
-        info_options.extend(["--cookies-from-browser", browser_cookie.lower()])
+    active_cookie = browser_cookie
+    if not active_cookie or active_cookie.lower() == "tidak ada":
+        from config import load_browser_cookie
+        active_cookie = load_browser_cookie()
+    if active_cookie and active_cookie.lower() != "tidak ada":
+        info_options.extend(["--cookies-from-browser", active_cookie.lower()])
+
     info_command = create_yt_dlp_command(url, options=info_options)
     startupinfo = None
     if os.name == 'nt': 
@@ -257,10 +329,25 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
         ui_queue.put({"type": "info_title", "title": "Mengambil Info..."})
         ui_queue.put({"type": "info_thumb", "text": "Mengambil Thumbnail...", "image": None})
         
-        result = subprocess.run(
-            info_command, capture_output=True, text=True, check=True,
-            timeout=30, startupinfo=startupinfo, encoding='utf-8', errors='ignore'
-        )
+        try:
+            result = subprocess.run(
+                info_command, capture_output=True, text=True, check=True,
+                timeout=45, stdin=subprocess.DEVNULL, startupinfo=startupinfo,
+                env=get_sanitized_env(), encoding='utf-8', errors='ignore'
+            )
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as run_err:
+            # Jika --impersonate chrome mengalami kendala timeout atau network stall, fallback tanpa impersonate
+            if "--impersonate" in info_options:
+                fallback_options = [opt for opt in info_options if opt not in ("--impersonate", "chrome")]
+                fallback_cmd = create_yt_dlp_command(url, options=fallback_options)
+                result = subprocess.run(
+                    fallback_cmd, capture_output=True, text=True, check=True,
+                    timeout=45, stdin=subprocess.DEVNULL, startupinfo=startupinfo,
+                    env=get_sanitized_env(), encoding='utf-8', errors='ignore'
+                )
+            else:
+                raise run_err
+
         stdout_text = result.stdout.strip()
         if not stdout_text:
             raise Exception("Respons info video kosong.")
@@ -273,17 +360,51 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
         # Kirim full info dict untuk fitur AI & metadata card
         ui_queue.put({"type": "info_data", "data": info})
 
-        thumb_url = info.get('thumbnail')
-        if thumb_url and thumb_url.startswith('http'):
-            image_data = requests.get(thumb_url, timeout=10).content
-            image = Image.open(BytesIO(image_data))
-            ui_queue.put({"type": "info_thumb_data", "image_data": image_data})
-        else:
+        # Kumpulkan kandidat thumbnail dari yt-dlp metadata
+        raw_thumbs = info.get('thumbnails') or []
+        candidate_thumbs = []
+        if isinstance(raw_thumbs, list) and raw_thumbs:
+            sorted_thumbs = sorted(
+                [t for t in raw_thumbs if isinstance(t, dict) and t.get('url')],
+                key=lambda x: (x.get('preference', 0), (x.get('width', 0) or 0) * (x.get('height', 0) or 0)),
+                reverse=True
+            )
+            for t in sorted_thumbs:
+                u = t.get('url')
+                if u and u.startswith('http') and u not in candidate_thumbs:
+                    candidate_thumbs.append(u)
+
+        main_thumb = info.get('thumbnail')
+        if main_thumb and main_thumb.startswith('http') and main_thumb not in candidate_thumbs:
+            candidate_thumbs.insert(0, main_thumb)
+
+        thumb_loaded = False
+        for c_url in candidate_thumbs:
+            try:
+                r_t = requests.get(c_url, timeout=6)
+                if r_t.status_code == 200 and len(r_t.content) > 100:
+                    Image.open(BytesIO(r_t.content)).verify()
+                    ui_queue.put({"type": "info_thumb_data", "image_data": r_t.content})
+                    thumb_loaded = True
+                    break
+            except Exception:
+                continue
+
+        if not thumb_loaded:
             ui_queue.put({"type": "info_thumb", "text": "Thumbnail tidak ditemukan.", "image": None})
     except subprocess.CalledProcessError as e:
-        ui_queue.put({"type": "info_title", "title": "Gagal mendapatkan info video (url error)."})
-        ui_queue.put({"type": "info_thumb", "text": "Gagal mendapatkan info thumbnail.", "image": None})
-        ui_queue.put({"type": "log", "text": f"yt-dlp error: {e.stderr}\n"})
+        err_msg = e.stderr or ""
+        reason = "Gagal mendapatkan info video (url error)."
+        if "This video is unavailable" in err_msg:
+            reason = "Video tidak tersedia di YouTube (mungkin dihapus, privat, atau dibatasi wilayah)."
+        elif "Private video" in err_msg:
+            reason = "Video bersifat privat. Diperlukan cookie login akun di Pengaturan."
+        elif "Sign in to confirm your age" in err_msg:
+            reason = "Video dibatasi usia (+18). Gunakan Cookie Browser di Pengaturan."
+        
+        ui_queue.put({"type": "info_title", "title": reason})
+        ui_queue.put({"type": "info_thumb", "text": reason, "image": None})
+        ui_queue.put({"type": "log", "text": f"\n[YT-DLP ERROR] {err_msg.strip()}\n"})
     except FileNotFoundError:
         ui_queue.put({"type": "info_title", "title": "ERROR: yt-dlp.exe tidak ditemukan di bin/"})
     except Exception as e:
@@ -639,15 +760,20 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
         "--embed-metadata"
     ]
     options.append(f"--ffmpeg-location={FFMPEG_PATH}")
+    options.append("--no-config-locations")
 
     proxy_val = load_proxy()
     if proxy_val:
         options.extend(["--proxy", proxy_val])
         ui_queue.put({"type": "log", "text": f"[OPT] Menggunakan Proxy: {proxy_val}\n"})
     
-    if browser_cookie and browser_cookie.lower() != "tidak ada":
-        options.extend(["--cookies-from-browser", browser_cookie.lower()])
-        ui_queue.put({"type": "log", "text": f"[OPT] Menggunakan Cookies dari Browser: {browser_cookie}\n"})
+    active_cookie = browser_cookie
+    if not active_cookie or active_cookie.lower() == "tidak ada":
+        from config import load_browser_cookie
+        active_cookie = load_browser_cookie()
+    if active_cookie and active_cookie.lower() != "tidak ada":
+        options.extend(["--cookies-from-browser", active_cookie.lower()])
+        ui_queue.put({"type": "log", "text": f"[OPT] Menggunakan Cookies dari Browser: {active_cookie}\n"})
     
     if not download_playlist:
         options.append("--no-playlist")
@@ -797,7 +923,7 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
         process = subprocess.Popen(
             command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1, universal_newlines=True,
-            startupinfo=startupinfo, encoding='utf-8', errors='ignore'
+            startupinfo=startupinfo, env=get_sanitized_env(), encoding='utf-8', errors='ignore'
         )
         current_process = process
         for line in iter(process.stdout.readline, ''):
@@ -835,7 +961,7 @@ def get_local_ytdlp_version():
             startupinfo.wShowWindow = subprocess.SW_HIDE
         res = subprocess.run(
             [YT_DLP_PATH, "--version"], capture_output=True, text=True,
-            timeout=5, startupinfo=startupinfo, encoding='utf-8', errors='ignore'
+            timeout=5, startupinfo=startupinfo, env=get_sanitized_env(), encoding='utf-8', errors='ignore'
         )
         if res.returncode == 0:
             return res.stdout.strip()

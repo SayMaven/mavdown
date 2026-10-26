@@ -1,18 +1,31 @@
-# PyInstaller
+# .NET / C# WPF Build Artifacts
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+*.userprefs
+*.pidb
+*.booproj
+*.sln.docstates
+
+# PyInstaller & Bundlers
 build/
 dist/
 *.spec
 !mavdown.spec
 
-# App Data
+# App Data & Local Storage
 downloads/
 config.json
 
-# Cache
+# Python Cache & Bytecode
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# Binaries (too large for git)
+# Standalone Binaries
 bin/*.exe
 bin/*.old
 bin/*.dll
@@ -25,11 +38,17 @@ bin/*.new
 # InnoSetup Output
 Output/
 
-# Build Scripts & Configs
+# Build Scripts & Local Configs
 setup.iss
 build_nuitka.bat
+build_desktop.bat
 
-# AI Agent Documentation
+# Scratch & Temporary Files
+scratch/
+*.tmp
+*.part
+*.ytdl
+
+# Local Documentation
 AGENTS.md
-
 docs/
