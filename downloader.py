@@ -9,6 +9,7 @@ import re
 import json
 import queue
 import html
+import urllib.parse
 
 from config import (
     YT_DLP_PATH, ARIA2_PATH, FFMPEG_PATH, NODE_PATH,
@@ -74,7 +75,6 @@ def update_progress_bar(line):
     progress_data = {"type": "progress"}
 
     # Deteksi awal segmen baru (yt-dlp log: "[download] Destination: ...")
-    # Setiap segmen baru menaikkan counter fase
     if re.search(r'\[download\]\s+Destination:', line):
         _dl_segment_count += 1
 
@@ -87,44 +87,64 @@ def update_progress_bar(line):
         percent = float(raw.group(1))
 
         # 2-fase: segmen 1 = video (0–70%), segmen 2 = audio (70–100%)
-        # Kalau hanya 1 segmen (audio-only / muxed), pakai 0–100% biasa
         if _dl_segment_count >= 2:
-            # Fase audio: 70% + porsi 30%
             unified = 0.70 + (percent / 100.0) * 0.30
-            phase_label = f"Audio {percent:.1f}%"
+            phase_label = f"Mengunduh Audio ({percent:.1f}%)"
         elif _dl_segment_count == 1:
-            # Fase video: porsi 70%
             unified = (percent / 100.0) * 0.70
-            phase_label = f"Video {percent:.1f}%"
+            phase_label = f"Mengunduh Video ({percent:.1f}%)"
         else:
-            # Belum ada Destination terdeteksi (aria2 dll) — fallback biasa
             unified = percent / 100.0
-            phase_label = f"{percent:.1f}%"
+            phase_label = f"Mengunduh ({percent:.1f}%)"
 
         progress_data["value"] = min(unified, 1.0)
         progress_data["text"] = f"Status: {phase_label}"
 
-    # Kecepatan unduhan (contoh: 8.50MiB/s)
-    match_speed = re.search(r'at\s+([\d.]+\s*[KMGTk]i?B/s)', line)
-    if match_speed:
-        progress_data["speed"] = match_speed.group(1).strip()
+    # Kecepatan unduhan (yt-dlp: 'at 8.50MiB/s', aria2c: 'DL:1.9MiB')
+    match_speed_yt = re.search(r'at\s+([\d.]+\s*[KMGTk]i?B/s)', line)
+    match_speed_aria = re.search(r'DL:([\d.]+\s*[KMGTk]i?B)', line)
+    if match_speed_yt:
+        progress_data["speed"] = match_speed_yt.group(1).strip()
+    elif match_speed_aria:
+        progress_data["speed"] = f"{match_speed_aria.group(1).strip()}/s"
 
-    # ETA (contoh: ETA 00:35)
-    match_eta = re.search(r'ETA\s+([\d:]+)', line)
-    if match_eta:
-        progress_data["eta"] = match_eta.group(1).strip()
+    # ETA (yt-dlp: 'ETA 00:35', aria2c: 'ETA:1m10s')
+    match_eta_yt = re.search(r'ETA\s+([\d:]+)', line)
+    match_eta_aria = re.search(r'ETA:([0-9a-zA-Z:]+)', line)
+    if match_eta_yt:
+        progress_data["eta"] = match_eta_yt.group(1).strip()
+    elif match_eta_aria:
+        progress_data["eta"] = match_eta_aria.group(1).strip()
 
-    # Ukuran terunduh / total (contoh: 45.20MiB of 120.50MiB)
-    match_size = re.search(r'([\d.]+\s*[KMGTk]i?B)\s+of\s+([\d.]+\s*[KMGTk]i?B)', line)
-    if match_size:
-        progress_data["size_dl"] = match_size.group(1).strip()
-        progress_data["size_total"] = match_size.group(2).strip()
+    # Ukuran terunduh / total (yt-dlp: '45.20MiB of 120.50MiB', aria2c: '1.7MiB/142MiB')
+    match_size_yt = re.search(r'([\d.]+\s*[KMGTk]i?B)\s+of\s+~?\s*([\d.]+\s*[KMGTk]i?B)', line)
+    match_size_aria = re.search(r'([\d.]+\s*[KMGTk]i?B)/([\d.]+\s*[KMGTk]i?B)', line)
+    if match_size_yt:
+        progress_data["size_dl"] = match_size_yt.group(1).strip()
+        progress_data["size_total"] = match_size_yt.group(2).strip()
+    elif match_size_aria:
+        progress_data["size_dl"] = match_size_aria.group(1).strip()
+        progress_data["size_total"] = match_size_aria.group(2).strip()
+
+    # Deteksi fase penggabungan & penanaman thumbnail FFmpeg
+    if "[Merger]" in line or "Merging formats into" in line:
+        progress_data["value"] = 0.94
+        progress_data["text"] = "Status: Menggabungkan video & audio (FFmpeg)..."
+        progress_data["speed"] = "-"
+        progress_data["eta"] = "-"
+    elif "[Metadata]" in line or "[EmbedThumbnail]" in line or "Adding thumbnail" in line:
+        progress_data["value"] = 0.98
+        progress_data["text"] = "Status: Menanamkan metadata & album art..."
+        progress_data["speed"] = "-"
+        progress_data["eta"] = "-"
 
     # Kirim jika ada data progress yang relevan
     if len(progress_data) > 1:
         ui_queue.put(progress_data)
 
-    ui_queue.put({"type": "log", "text": line})
+    clean_line = line.strip('\r\n')
+    if clean_line:
+        ui_queue.put({"type": "log", "text": f"{clean_line}\n"})
 
 
 def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
@@ -270,12 +290,18 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
                 except Exception:
                     continue
 
+            # Direct Image Bytes jika sudah diunduh oleh generic engine
+            if not thumb_loaded and fast_info.get('_direct_image_bytes'):
+                ui_queue.put({"type": "info_thumb_data", "image_data": fast_info['_direct_image_bytes']})
+                thumb_loaded = True
+
             # Fallback pamungkas: Ekstraksi 1 frame video via ffmpeg jika semua CDN thumbnail server gagal
             if not thumb_loaded and fast_info.get('video_url'):
                 try:
                     v_url = fast_info['video_url']
                     cmd = [
                         FFMPEG_PATH,
+                        '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n',
                         '-ss', '00:00:01',
                         '-i', v_url,
                         '-vframes', '1',
@@ -288,7 +314,7 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
                         startupinfo = subprocess.STARTUPINFO()
                         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                         startupinfo.wShowWindow = subprocess.SW_HIDE
-                    ff_res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5, startupinfo=startupinfo)
+                    ff_res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=6, startupinfo=startupinfo)
                     if ff_res.returncode == 0 and len(ff_res.stdout) > 500:
                         Image.open(BytesIO(ff_res.stdout)).verify()
                         ui_queue.put({"type": "info_thumb_data", "image_data": ff_res.stdout})
@@ -302,13 +328,22 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
     except Exception:
         pass
 
+    detected_plat = detect_platform(url)
     info_options = [
         "--skip-download", "--print-json", "--no-playlist", 
         "--js-runtimes", f"node:{NODE_PATH}",
         "--ffmpeg-location", os.path.dirname(FFMPEG_PATH),
         "--no-config-locations",
-        "--impersonate", "chrome"
     ]
+    if detected_plat == 'youtube':
+        info_options.extend([
+            "--impersonate", "chrome",
+            "--extractor-args", "youtube:player_client=web_embedded,android,web"
+        ])
+    else:
+        info_options.extend([
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ])
     proxy_val = load_proxy()
     if proxy_val:
         info_options.extend(["--proxy", proxy_val])
@@ -336,16 +371,40 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
                 env=get_sanitized_env(), encoding='utf-8', errors='ignore'
             )
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as run_err:
-            # Jika --impersonate chrome mengalami kendala timeout atau network stall, fallback tanpa impersonate
+            retry_success = False
+            # Fallback 1: Jika impersonate chrome bermasalah di IP tertentu, coba tanpa impersonate
             if "--impersonate" in info_options:
-                fallback_options = [opt for opt in info_options if opt not in ("--impersonate", "chrome")]
-                fallback_cmd = create_yt_dlp_command(url, options=fallback_options)
-                result = subprocess.run(
-                    fallback_cmd, capture_output=True, text=True, check=True,
-                    timeout=45, stdin=subprocess.DEVNULL, startupinfo=startupinfo,
-                    env=get_sanitized_env(), encoding='utf-8', errors='ignore'
-                )
-            else:
+                try:
+                    fallback_options = [opt for opt in info_options if opt not in ("--impersonate", "chrome")]
+                    fallback_cmd = create_yt_dlp_command(url, options=fallback_options)
+                    result = subprocess.run(
+                        fallback_cmd, capture_output=True, text=True, check=True,
+                        timeout=45, stdin=subprocess.DEVNULL, startupinfo=startupinfo,
+                        env=get_sanitized_env(), encoding='utf-8', errors='ignore'
+                    )
+                    retry_success = True
+                except Exception:
+                    pass
+            
+            # Fallback 2: Jika terdeteksi tantangan bot atau rate-limit 429, fallback ke Android client
+            if not retry_success and detected_plat == 'youtube':
+                try:
+                    emergency_options = [
+                        opt for opt in info_options
+                        if opt not in ("--impersonate", "chrome", "--extractor-args", "youtube:player_client=web_embedded,android,web")
+                    ]
+                    emergency_options.extend(["--extractor-args", "youtube:player_client=android"])
+                    emergency_cmd = create_yt_dlp_command(url, options=emergency_options)
+                    result = subprocess.run(
+                        emergency_cmd, capture_output=True, text=True, check=True,
+                        timeout=45, stdin=subprocess.DEVNULL, startupinfo=startupinfo,
+                        env=get_sanitized_env(), encoding='utf-8', errors='ignore'
+                    )
+                    retry_success = True
+                except Exception:
+                    pass
+
+            if not retry_success:
                 raise run_err
 
         stdout_text = result.stdout.strip()
@@ -355,9 +414,57 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
         first_line = stdout_text.splitlines()[0]
         info = json.loads(first_line)
         title = info.get('title', 'Judul Tidak Ditemukan')
-        ui_queue.put({"type": "info_title", "title": f"Judul: {title}"})
 
-        # Kirim full info dict untuk fitur AI & metadata card
+        # Lengkapi metadata video generic via probe_media_stream (FFprobe) jika durasi atau resolusi belum ada
+        if detected_plat == 'generic' or not info.get('duration') or not info.get('width'):
+            try:
+                from engines.base import probe_media_stream
+                target_probe_url = info.get('url') or url
+                probe_res = probe_media_stream(target_probe_url, timeout=6)
+                if probe_res:
+                    if not info.get('width') and probe_res.get('width'):
+                        info['width'] = probe_res['width']
+                    if not info.get('height') and probe_res.get('height'):
+                        info['height'] = probe_res['height']
+                    if not info.get('duration') and probe_res.get('duration'):
+                        info['duration'] = probe_res['duration']
+                    if not info.get('fps') and probe_res.get('fps'):
+                        info['fps'] = probe_res['fps']
+                    if not info.get('codec') and probe_res.get('codec'):
+                        info['codec'] = probe_res['codec']
+                    if probe_res.get('resolution_label'):
+                        info['resolution_label'] = probe_res['resolution_label']
+            except Exception:
+                pass
+
+        # Deteksi otomatis jika media generic adalah gambar langsung
+        ext_check = os.path.splitext(urllib.parse.urlparse(url).path)[1].lower()
+        is_direct_img = (
+            ext_check in ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.avif') or
+            str(info.get('vcodec') or '').lower() in ('png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif') or
+            str(info.get('ext') or '').lower() in ('png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif')
+        )
+        if is_direct_img:
+            info['is_slide'] = True
+            info['slide_count'] = 1
+            info['duration'] = 0
+            info['duration_string'] = '1 Foto HD'
+            info['fps'] = None
+            if not info.get('thumbnail'):
+                info['thumbnail'] = info.get('url') or url
+
+        # Format string durasi yang rapi
+        if not info.get('duration_string') and info.get('duration'):
+            try:
+                dur_sec = float(info['duration'])
+                if dur_sec > 0:
+                    m, s = divmod(int(dur_sec), 60)
+                    h, m = divmod(m, 60)
+                    info['duration_string'] = f"{h}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
+            except Exception:
+                pass
+
+        ui_queue.put({"type": "info_title", "title": f"Judul: {title}"})
         ui_queue.put({"type": "info_data", "data": info})
 
         # Kumpulkan kandidat thumbnail dari yt-dlp metadata
@@ -374,7 +481,7 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
                 if u and u.startswith('http') and u not in candidate_thumbs:
                     candidate_thumbs.append(u)
 
-        main_thumb = info.get('thumbnail')
+        main_thumb = info.get('thumbnail') or (info.get('url') if is_direct_img else None)
         if main_thumb and main_thumb.startswith('http') and main_thumb not in candidate_thumbs:
             candidate_thumbs.insert(0, main_thumb)
 
@@ -390,9 +497,92 @@ def get_video_info(url, browser_cookie="Tidak Ada", share_text=None):
             except Exception:
                 continue
 
+        # Fallback ekstraksi thumbnail frame via FFmpeg untuk video generic / direct stream
+        if not thumb_loaded and not is_direct_img and os.path.exists(FFMPEG_PATH):
+            try:
+                target_stream = info.get('url') or url
+                dur_val = float(info.get('duration') or 0)
+                ss_time = "00:00:03" if (dur_val == 0 or dur_val > 10) else "00:00:01"
+                cmd = [
+                    FFMPEG_PATH,
+                    '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n',
+                    '-ss', ss_time,
+                    '-i', target_stream,
+                    '-vframes', '1',
+                    '-f', 'image2pipe',
+                    '-vcodec', 'mjpeg',
+                    'pipe:1'
+                ]
+                startupinfo_ff = None
+                if sys.platform == "win32":
+                    startupinfo_ff = subprocess.STARTUPINFO()
+                    startupinfo_ff.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    startupinfo_ff.wShowWindow = subprocess.SW_HIDE
+                ff_res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=7, startupinfo=startupinfo_ff)
+                if ff_res.returncode == 0 and len(ff_res.stdout) > 500:
+                    Image.open(BytesIO(ff_res.stdout)).verify()
+                    ui_queue.put({"type": "info_thumb_data", "image_data": ff_res.stdout})
+                    thumb_loaded = True
+            except Exception:
+                pass
+
         if not thumb_loaded:
             ui_queue.put({"type": "info_thumb", "text": "Thumbnail tidak ditemukan.", "image": None})
     except subprocess.CalledProcessError as e:
+        # Fallback khusus video generic/direct stream yang tidak dikenali extractor bawaan yt-dlp
+        if detected_plat == 'generic':
+            try:
+                from engines.base import probe_media_stream
+                probe_res = probe_media_stream(url, timeout=6)
+                if probe_res and (probe_res.get('width') or probe_res.get('duration')):
+                    parsed_path = urllib.parse.urlparse(url).path
+                    base_name = os.path.basename(parsed_path) or 'Direct Video'
+                    title_cand = os.path.splitext(base_name)[0] or 'Direct Video'
+                    dur_sec = float(probe_res.get('duration', 0) or 0)
+                    m, s = divmod(int(dur_sec), 60)
+                    h, m = divmod(m, 60)
+                    dur_str = f"{h}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
+                    synthetic_info = {
+                        'title': title_cand,
+                        'uploader': 'Media Generic',
+                        'width': probe_res.get('width'),
+                        'height': probe_res.get('height'),
+                        'duration': dur_sec,
+                        'duration_string': dur_str,
+                        'fps': probe_res.get('fps'),
+                        'codec': probe_res.get('codec'),
+                        'resolution_label': probe_res.get('resolution_label', 'HD'),
+                        'platform': 'generic',
+                        'webpage_url': url,
+                        'url': url
+                    }
+                    ui_queue.put({"type": "info_title", "title": f"Judul: {title_cand}"})
+                    ui_queue.put({"type": "info_data", "data": synthetic_info})
+
+                    if os.path.exists(FFMPEG_PATH):
+                        ss_time = '00:00:03' if dur_sec > 5 else '00:00:01'
+                        cmd = [
+                            FFMPEG_PATH,
+                            '-ss', ss_time,
+                            '-i', url,
+                            '-vframes', '1',
+                            '-f', 'image2pipe',
+                            '-vcodec', 'mjpeg',
+                            'pipe:1'
+                        ]
+                        startupinfo_ff = None
+                        if sys.platform == "win32":
+                            startupinfo_ff = subprocess.STARTUPINFO()
+                            startupinfo_ff.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                            startupinfo_ff.wShowWindow = subprocess.SW_HIDE
+                        ff_res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=7, startupinfo=startupinfo_ff)
+                        if ff_res.returncode == 0 and len(ff_res.stdout) > 500:
+                            Image.open(BytesIO(ff_res.stdout)).verify()
+                            ui_queue.put({"type": "info_thumb_data", "image_data": ff_res.stdout})
+                            return
+            except Exception:
+                pass
+
         err_msg = e.stderr or ""
         reason = "Gagal mendapatkan info video (url error)."
         if "This video is unavailable" in err_msg:
@@ -718,49 +908,57 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
 
     # ── TIER 1: FAST REST ENGINE ──
     if not download_playlist and not custom_cmd:
-        engine_opts = {
-            'mode': mode,
-            'audio_format': audio_format,
-            'resolution': res,
-            'video_codec': vcodec,
-            'audio_codec': acodec,
-            'container': container,
-            'embed_thumb': embed_thumb,
-            'share_text': share_text,
-            'ugoira_format': ugoira_format
-        }
-        try:
-            fast_success = dispatch_fast_download(
-                url, output_dir, ui_queue, engine_opts,
-                abort_checker=is_abort_requested
-            )
-            if fast_success:
-                cleanup_orphaned_temp_files(output_dir)
-                ui_queue.put({"type": "download_success_meta", "url": url, "output_dir": output_dir})
-                ui_queue.put({"type": "download_finish"})
-                return
-            elif is_abort_requested():
-                cleanup_orphaned_temp_files(output_dir)
-                ui_queue.put({"type": "download_finish"})
-                return
-            else:
-                platform_name = detect_platform(url)
-                if platform_name != 'generic':
+        platform_name = detect_platform(url)
+        tier1_supported = ('tiktok', 'douyin', 'twitter', 'pinterest', 'instagram', 'facebook', 'bilibili', 'pixiv')
+
+        if platform_name in tier1_supported:
+            engine_opts = {
+                'mode': mode,
+                'audio_format': audio_format,
+                'res': res,
+                'vcodec': vcodec,
+                'acodec': acodec,
+                'container': container,
+                'ugoira_format': ugoira_format
+            }
+            try:
+                fast_success = dispatch_fast_download(
+                    url, output_dir, ui_queue, engine_opts,
+                    abort_checker=is_abort_requested
+                )
+                if fast_success:
+                    cleanup_orphaned_temp_files(output_dir)
+                    ui_queue.put({"type": "download_success_meta", "url": url, "output_dir": output_dir})
+                    ui_queue.put({"type": "download_finish"})
+                    return
+                elif is_abort_requested():
+                    cleanup_orphaned_temp_files(output_dir)
+                    ui_queue.put({"type": "download_finish"})
+                    return
+                else:
                     ui_queue.put({"type": "log", "text": f"\n[TIER 2] Melanjutkan ke Engine Fallback (yt-dlp + aria2c)...\n"})
-        except Exception as e:
-            ui_queue.put({"type": "log", "text": f"[TIER 1 WARNING] Terjadi kendala di Tier 1: {e}\n[TIER 2] Mengalihkan ke yt-dlp...\n"})
+            except Exception as e:
+                ui_queue.put({"type": "log", "text": f"[TIER 1 WARNING] Terjadi kendala di Tier 1: {e}\n[TIER 2] Mengalihkan ke yt-dlp...\n"})
+        else:
+            if platform_name == 'youtube':
+                ui_queue.put({"type": "log", "text": "\n[ENGINE] Menjalankan Engine Unduhan YouTube (yt-dlp + aria2c)...\n"})
 
     options = [
         "--ignore-errors", "--retries", "infinite", 
         "--fragment-retries", "infinite", 
         "--js-runtimes", f"node:{NODE_PATH}",
-        "--impersonate", "chrome",
         "--windows-filenames",
         "--trim-filenames", "100",
-        "--embed-metadata"
+        "--embed-metadata",
+        "--newline",
     ]
     options.append(f"--ffmpeg-location={FFMPEG_PATH}")
     options.append("--no-config-locations")
+
+    if platform_name == 'youtube':
+        options.extend(["--impersonate", "chrome", "--extractor-args", "youtube:player_client=web_embedded,android,web"])
+    else:
+        options.extend(["--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"])
 
     proxy_val = load_proxy()
     if proxy_val:
@@ -794,24 +992,43 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
         if use_aria2:
             options.extend([
                 "--external-downloader", ARIA2_PATH, 
-                "--external-downloader-args", "aria2c:-x 16 -k 1M --allow-overwrite=true"
+                "--external-downloader-args", "aria2c:-x 16 -k 1M --summary-interval=1 --allow-overwrite=true"
             ])
             ui_queue.put({"type": "log", "text": "[OPT] Menggunakan Aria2c sebagai downloader.\n"})
             
-        if mode == "audio_only":
+        if mode in ("audio", "audio_only"):
             effective_afmt = "mp3" if audio_format in ("auto", "best", "") else audio_format
             options.extend(["-f", "bestaudio", "--extract-audio", "--audio-format", effective_afmt])
             ui_queue.put({"type": "log", "text": f"[MODE] Audio Saja ({effective_afmt})\n"})
         else:
-            effective_vcodec = vcodec
-            effective_acodec = acodec
-            effective_container = "mp4" if container in ("auto", "best", "") else container
+            raw_vcodec = str(vcodec or "").lower().strip()
+            raw_acodec = str(acodec or "").lower().strip()
+            raw_cont = str(container or "").lower().strip()
+
+            effective_container = "mp4" if raw_cont in ("auto", "best", "") else raw_cont
+            
+            # Normalisasi video codec (None = tidak dibatasi / auto)
+            effective_vcodec = None
+            if raw_vcodec in ("h264", "avc"):
+                effective_vcodec = "h264"
+            elif raw_vcodec in ("vp9", "vp09"):
+                effective_vcodec = "vp9"
+            elif raw_vcodec in ("av1", "av01"):
+                effective_vcodec = "av1"
+
+            # Normalisasi audio codec (None = tidak dibatasi / auto)
+            effective_acodec = None
+            if raw_acodec in ("m4a", "mp4a", "aac"):
+                effective_acodec = "m4a"
+            elif raw_acodec == "opus":
+                effective_acodec = "opus"
+
             if effective_container == "webm":
                 if effective_vcodec == "h264":
                     effective_vcodec = "vp9"
                 if effective_acodec == "m4a":
                     effective_acodec = "opus"
-            elif container == "mov":
+            elif effective_container == "mov":
                 if effective_vcodec in ["vp9", "av1"]:
                     effective_vcodec = "h264"
                 if effective_acodec == "opus":
@@ -823,11 +1040,11 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
             f_video_parts = ["bestvideo"]
             if res != "best":
                 f_video_parts.append(f"[height<={res}]")
-            if effective_vcodec != "best":
+            if effective_vcodec and effective_vcodec in vcodec_map:
                 f_video_parts.append(f"[vcodec~={vcodec_map[effective_vcodec]}]")
                 
             f_audio_parts = ["bestaudio"]
-            if effective_acodec != "best":
+            if effective_acodec and effective_acodec in acodec_map:
                 f_audio_parts.append(f"[acodec~={acodec_map[effective_acodec]}]")
                 
             f_video_str = "".join(f_video_parts)
@@ -836,7 +1053,7 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
             
             # Tambahkan juga constraint pada format "best" (pre-muxed) dan "bestvideo" saja.
             b_str = f"best{res_str}"
-            if effective_vcodec != "best":
+            if effective_vcodec and effective_vcodec in vcodec_map:
                 b_str += f"[vcodec~={vcodec_map[effective_vcodec]}]"
             
             # Jika tidak ada constraint sama sekali, pastikan 'high' diprioritaskan sebelum 'best'
@@ -908,7 +1125,17 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
             options.extend(["-o", os.path.join(output_dir, "%(title).100s.%(ext)s")])
         
     command = create_yt_dlp_command(url, options)
-    ui_queue.put({"type": "log", "text": f"\nPerintah: {' '.join(command)}\n"})
+    ui_queue.put({
+        "type": "log",
+        "text": f"\n[EKSEKUSI] Memulai proses unduhan yt-dlp{' (akselerasi aria2c 16x)' if use_aria2 else ''}...\n"
+    })
+    ui_queue.put({
+        "type": "progress",
+        "value": 0.05,
+        "text": "Menghubungi server & menyiapkan stream...",
+        "speed": "-",
+        "eta": "-"
+    })
     
     try:
         startupinfo = None
@@ -921,7 +1148,7 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
         download_start_time = time.time() - 3.0
 
         process = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1, universal_newlines=True,
             startupinfo=startupinfo, env=get_sanitized_env(), encoding='utf-8', errors='ignore'
         )
@@ -933,6 +1160,46 @@ def download_video_logic(url, mode, audio_format, res, vcodec, acodec, container
             ui_queue.put({"type": "log", "text": "\n\n--- UNDUHAN SUKSES ---\n"})
             if download_subs or embed_subs:
                 process_downloaded_subtitles(output_dir, download_start_time, mode == "audio_only", embed_subs, download_subs)
+            
+            # Khusus file generic: jika embed_thumb aktif, tanamkan thumbnail frame via FFmpeg
+            if embed_thumb and platform_name == 'generic':
+                try:
+                    from engines.base import embed_thumbnail_to_media
+                    cand_files = []
+                    for itm in os.listdir(output_dir):
+                        fp = os.path.join(output_dir, itm)
+                        if os.path.isfile(fp) and fp.lower().endswith(('.mp4', '.mkv', '.mov', '.mp3', '.m4a')):
+                            try:
+                                if os.path.getmtime(fp) >= download_start_time:
+                                    cand_files.append(fp)
+                            except Exception:
+                                pass
+                    for cf in cand_files:
+                        temp_cover = cf + ".tmp_cover.jpg"
+                        try:
+                            cmd_c = [
+                                FFMPEG_PATH, "-y",
+                                "-ss", "00:00:03",
+                                "-i", cf,
+                                "-vframes", "1",
+                                "-q:v", "2",
+                                temp_cover
+                            ]
+                            s_info = None
+                            if sys.platform == "win32":
+                                s_info = subprocess.STARTUPINFO()
+                                s_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                                s_info.wShowWindow = subprocess.SW_HIDE
+                            c_res = subprocess.run(cmd_c, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, startupinfo=s_info)
+                            if c_res.returncode == 0 and os.path.exists(temp_cover) and os.path.getsize(temp_cover) > 500:
+                                embed_thumbnail_to_media(cf, temp_cover, ui_queue=ui_queue)
+                        finally:
+                            if os.path.exists(temp_cover):
+                                try: os.remove(temp_cover)
+                                except Exception: pass
+                except Exception:
+                    pass
+
             cleanup_orphaned_temp_files(output_dir)
             ui_queue.put({"type": "download_success_meta", "url": url, "output_dir": output_dir, "start_time": download_start_time})
         elif current_process is None:

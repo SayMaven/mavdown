@@ -2,10 +2,11 @@ import os
 import re
 import html
 import requests
+from datetime import datetime, timezone
 from engines.base import (
     DEFAULT_HEADERS, sanitize_filename, stream_download_file,
     fast_remux_mp4, extract_audio_from_video, normalize_image_to_jpeg,
-    embed_thumbnail_to_media, probe_media_stream
+    embed_thumbnail_to_media, probe_media_stream, postprocess_video
 )
 
 FB_CRAWLER_HEADERS = {
@@ -41,6 +42,9 @@ def get_facebook_info(url: str) -> dict:
                   re.search(r'<meta\s+name=["\']description["\']\s+content=["\']([^"\']+)["\']', page_html)
         og_img = re.search(r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']', page_html)
         tw_img = re.search(r'<meta\s+name=["\']twitter:image["\']\s+content=["\']([^"\']+)["\']', page_html)
+
+        raw_title = html.unescape(og_title.group(1)).strip() if og_title else ''
+        raw_desc = html.unescape(og_desc.group(1)).strip() if og_desc else ''
 
         candidates = []
         for im in (og_img, tw_img):
@@ -118,7 +122,6 @@ def get_facebook_info(url: str) -> dict:
             date_val = date_cand_m.group(1)
             if date_val.isdigit() and len(date_val) >= 9:
                 try:
-                    from datetime import datetime, timezone
                     dt = datetime.fromtimestamp(int(date_val), tz=timezone.utc)
                     upload_date = dt.strftime('%Y%m%d')
                     date_string = dt.strftime('%d/%m/%Y')
@@ -224,14 +227,18 @@ def download_facebook(url: str, output_dir: str, ui_queue=None, options=None, ab
             if ui_queue:
                 ui_queue.put({"type": "log", "text": "[TIER 1] Menemukan stream video direct Facebook!\n"})
 
+            raw_container = options.get('container', 'auto') if options else 'auto'
+            container = 'mp4' if raw_container in ('auto', 'best', '', None) else str(raw_container).lower()
+            ext = f".{container}"
+
             raw_path = os.path.join(output_dir, f"{base_name}_raw.mp4")
-            final_path = os.path.join(output_dir, f"{base_name}.mp4")
+            final_path = os.path.join(output_dir, f"{base_name}{ext}")
 
             success = stream_download_file(video_url, raw_path, ui_queue, abort_checker, label="Unduh Video Facebook")
             if not success:
                 return False
 
-            fast_remux_mp4(raw_path, final_path)
+            postprocess_video(raw_path, final_path, options, ui_queue, abort_checker)
 
             saved_path = final_path
             if mode == 'audio_only':

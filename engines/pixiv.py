@@ -60,35 +60,66 @@ def get_pixiv_headers(session: str = None, referer: str = None) -> dict:
 def verify_pixiv_session(session: str) -> tuple[bool, str]:
     """
     Memverifikasi apakah nilai cookie sesi PHPSESSID valid dan masih aktif.
-    Mengembalikan (is_valid, username_or_error_msg).
+    Mengembalikan (is_valid, user_info_or_error_msg).
+    Contoh user_info: 'Terhubung sebagai りな (ID: 64972940)'.
     """
     if not session or not session.strip():
         return False, "Sesi kosong"
     
-    headers = get_pixiv_headers(session=session.strip())
+    clean_session = session.strip()
+    headers = get_pixiv_headers(session=clean_session)
     try:
-        # Panggil endpoint profil login pengguna
+        # 1. Panggil endpoint resmi informasi akun pengguna yang sedang login (/ajax/user/self)
         resp = requests.get(
-            f"{PIXIV_BASE_URL}/ajax/user/extra",
+            f"{PIXIV_BASE_URL}/ajax/user/self",
             headers=headers,
             timeout=10
         )
         if resp.status_code == 200:
             data = resp.json()
-            if not data.get('error'):
-                body = data.get('body', {})
-                name = body.get('userName') or body.get('name') or "Pengguna Pixiv"
-                user_id = body.get('userId') or ""
-                label = f"{name} (ID: {user_id})" if user_id else name
-                return True, label
-        # Coba endpoint fallback
-        resp2 = requests.get(f"{PIXIV_BASE_URL}/ajax/top/illust", headers=headers, timeout=10)
+            user_data = data.get('userData')
+            if isinstance(user_data, dict):
+                name = user_data.get('name') or user_data.get('pixivId') or "Pengguna Pixiv"
+                user_id = user_data.get('id') or ""
+                prem_label = " (Premium)" if user_data.get('premium') else ""
+                info = f"{name} (ID: {user_id}){prem_label}" if user_id else f"{name}{prem_label}"
+                return True, info
+            elif user_data is None:
+                # Sesi tidak dikenali atau kadaluarsa oleh server Pixiv
+                return False, "Sesi kadaluarsa atau tidak valid"
+
+        # 2. Endpoint fallback touch (/touch/ajax/user/self/status)
+        resp2 = requests.get(
+            f"{PIXIV_BASE_URL}/touch/ajax/user/self/status",
+            headers=headers,
+            timeout=10
+        )
         if resp2.status_code == 200:
             data2 = resp2.json()
-            body2 = data2.get('body', {})
-            # Jika userLoggedIn true
-            if body2.get('userLoggedIn') or data2.get('userLoggedIn'):
-                return True, "Sesi Aktif"
+            if not data2.get('error'):
+                user_status = data2.get('body', {}).get('user_status', {})
+                user_name = user_status.get('user_name') or user_status.get('user_account')
+                user_id = user_status.get('user_id') or ""
+                if user_name:
+                    info = f"{user_name} (ID: {user_id})" if user_id else str(user_name)
+                    return True, info
+
+        # 3. Fallback ekstraksi ID dari token sesi (<user_id>_<token>) jika ada
+        user_id_cand = clean_session.split('_')[0] if '_' in clean_session else None
+        if user_id_cand and user_id_cand.isdigit():
+            resp3 = requests.get(
+                f"{PIXIV_BASE_URL}/ajax/user/{user_id_cand}?full=1",
+                headers=headers,
+                timeout=10
+            )
+            if resp3.status_code == 200:
+                data3 = resp3.json()
+                if not data3.get('error'):
+                    body3 = data3.get('body', {})
+                    name3 = body3.get('name') or body3.get('userId')
+                    if name3:
+                        info = f"{name3} (ID: {user_id_cand})"
+                        return True, info
     except Exception as e:
         return False, f"Gagal menghubungi Pixiv: {e}"
 
@@ -381,7 +412,7 @@ def get_pixiv_info(url: str, session: str = None) -> dict:
                 'clean_title': f"Pixiv_{illust_id}",
                 'author': "Pixiv Artist",
                 'thumbnail': "",
-                'is_slide': False,
+                'is_slide': True,
                 'is_ugoira': False,
                 'resolution_label': "Perlu Login",
                 'error_message': "Karya ini dibatasi (R-18 atau Members-Only) dan memerlukan sesi login aktif."
@@ -399,7 +430,7 @@ def get_pixiv_info(url: str, session: str = None) -> dict:
                 'clean_title': f"Pixiv_{illust_id}",
                 'author': "Pixiv Artist",
                 'thumbnail': "",
-                'is_slide': False,
+                'is_slide': True,
                 'is_ugoira': False,
                 'resolution_label': "Perlu Login" if is_restricted else "Error",
                 'error_message': msg or "Konten tidak dapat diakses."
@@ -436,14 +467,14 @@ def get_pixiv_info(url: str, session: str = None) -> dict:
             if x_restrict > 0:
                 res_label += " (R-18)"
 
-        is_slide = (page_count > 1 and not is_ugoira)
+        is_slide = not is_ugoira
         slide_count = page_count if not is_ugoira else 0
 
         dur_str = ""
         if is_ugoira:
             dur_str = "Animasi Ugoira"
         elif is_slide:
-            dur_str = f"{page_count} Halaman"
+            dur_str = f"{page_count} Halaman" if page_count > 1 else "1 Foto HD"
 
         return {
             'title': display_title,

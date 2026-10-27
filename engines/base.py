@@ -258,12 +258,13 @@ def postprocess_video(
         needs_acodec_transcode = True
 
     # Cek apakah container output berbeda atau perlu transcode
-    ext = os.path.splitext(final_output_path)[1].lower().lstrip('.')
-    container_mismatch = (ext != 'mp4' and ext != '')
+    src_ext = os.path.splitext(raw_video_path)[1].lower().lstrip('.')
+    dst_ext = os.path.splitext(final_output_path)[1].lower().lstrip('.')
+    container_mismatch = (src_ext != dst_ext and dst_ext != '')
 
     # Jika semua parameter standar / cocok dengan sumber asli: FAST REMUX (-c copy)
     if not needs_scale and not needs_vcodec_transcode and not needs_acodec_transcode and not container_mismatch:
-        return fast_remux_mp4(raw_video_path, final_output_path)
+        return fast_remux_video(raw_video_path, final_output_path)
 
     # Bila membutuhkan transcode / downscaling / re-encode
     action_notes = []
@@ -367,35 +368,36 @@ def postprocess_video(
         try: os.remove(temp_out)
         except Exception: pass
 
-    # Fallback jika transcode gagal: gunakan fast_remux
-    return fast_remux_mp4(raw_video_path, final_output_path)
+    # Fallback jika transcode gagal: gunakan fast_remux_video
+    return fast_remux_video(raw_video_path, final_output_path)
 
-def fast_remux_mp4(raw_mp4_path: str, final_mp4_path: str, timeout: int = 20) -> bool:
+def fast_remux_video(raw_video_path: str, final_video_path: str, timeout: int = 20) -> bool:
     """
-    Fast Stream Remux MP4 menggunakan FFmpeg (-c copy -movflags +faststart)
-    Memindahkan moov atom ke depan agar video langsung dapat diputar seketika
-    dengan penggunaan CPU mendekati 0%.
+    Fast Stream Remux menggunakan FFmpeg (-c copy) instan tanpa beban CPU.
+    Memindahkan moov atom ke depan untuk MP4/MOV, atau stream copy untuk MKV/WEBM.
     """
-    if not os.path.exists(raw_mp4_path) or os.path.getsize(raw_mp4_path) == 0:
+    if not os.path.exists(raw_video_path) or os.path.getsize(raw_video_path) == 0:
         return False
 
     if not os.path.exists(FFMPEG_PATH):
         try:
-            if os.path.exists(final_mp4_path):
-                os.remove(final_mp4_path)
-            os.rename(raw_mp4_path, final_mp4_path)
+            if os.path.exists(final_video_path):
+                os.remove(final_video_path)
+            os.rename(raw_video_path, final_video_path)
             return True
         except Exception:
             return False
 
-    temp_remux = final_mp4_path + ".remux.mp4"
+    out_ext = os.path.splitext(final_video_path)[1].lower()
+    temp_remux = final_video_path + f".remux{out_ext}"
     cmd = [
         FFMPEG_PATH, "-y",
-        "-i", raw_mp4_path,
-        "-c", "copy",
-        "-movflags", "+faststart",
-        temp_remux
+        "-i", raw_video_path,
+        "-c", "copy"
     ]
+    if out_ext in ('.mp4', '.mov', '.m4v'):
+        cmd.extend(["-movflags", "+faststart"])
+    cmd.append(temp_remux)
     
     startupinfo = None
     if os.name == 'nt':
@@ -409,10 +411,10 @@ def fast_remux_mp4(raw_mp4_path: str, final_mp4_path: str, timeout: int = 20) ->
             startupinfo=startupinfo, encoding='utf-8', errors='ignore'
         )
         if res.returncode == 0 and os.path.exists(temp_remux) and os.path.getsize(temp_remux) > 0:
-            if os.path.exists(final_mp4_path):
-                os.remove(final_mp4_path)
-            os.rename(temp_remux, final_mp4_path)
-            try: os.remove(raw_mp4_path)
+            if os.path.exists(final_video_path):
+                os.remove(final_video_path)
+            os.rename(temp_remux, final_video_path)
+            try: os.remove(raw_video_path)
             except Exception: pass
             return True
     except Exception:
@@ -424,12 +426,14 @@ def fast_remux_mp4(raw_mp4_path: str, final_mp4_path: str, timeout: int = 20) ->
 
     # Fallback jika remux gagal: salin file mentah langsung
     try:
-        if os.path.exists(final_mp4_path):
-            os.remove(final_mp4_path)
-        os.rename(raw_mp4_path, final_mp4_path)
+        if os.path.exists(final_video_path):
+            os.remove(final_video_path)
+        os.rename(raw_video_path, final_video_path)
         return True
     except Exception:
         return False
+
+fast_remux_mp4 = fast_remux_video
 
 def extract_audio_from_video(video_path: str, output_audio_path: str, fmt: str = "mp3") -> bool:
     """

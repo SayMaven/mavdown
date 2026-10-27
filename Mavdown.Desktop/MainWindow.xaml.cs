@@ -46,6 +46,10 @@ namespace Mavdown.Desktop
         private bool _isPixivMasked = true;
         private string _rawPixivSession = "";
 
+        // Bilibili session mask
+        private bool _isBilibiliMasked = true;
+        private string _rawBilibiliSession = "";
+
         // Platform detection patterns (ui/constants.py)
         private readonly List<(string pattern, string name, string colorHex)> _platformPatterns = new()
         {
@@ -199,19 +203,46 @@ namespace Mavdown.Desktop
                 EngineStatusBadge.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#065F46"));
                 AppendLog("[SYSTEM] Engine Mavdown berhasil terhubung dan siap.\n");
                 await _bridge.RequestConfigAsync();
+                await _bridge.RequestHistoryAsync(); // Pre-load riwayat di latar belakang saat startup
             };
 
             _bridge.OnLog += text => AppendLog(text);
 
-            _bridge.OnProgress += (val, text, speed, eta) =>
+            _bridge.OnProgress += (val, text, speed, eta, sizeDl, sizeTotal) =>
             {
-                DownloadProgressBar.Value = Math.Min(100.0, Math.Max(0.0, val * 100.0));
-                ProgressStatusText.Text = string.IsNullOrEmpty(text) ? $"Status: {(val * 100.0):F1}%" : text;
-                
-                string stats = "";
-                if (!string.IsNullOrEmpty(speed)) stats += $"Kecepatan: {speed}";
-                if (!string.IsNullOrEmpty(eta)) stats += (stats.Length > 0 ? "  |  " : "") + $"ETA {eta}";
-                ProgressStatsText.Text = stats;
+                double targetPercent = Math.Min(100.0, Math.Max(0.0, val * 100.0));
+                AnimateProgressBar(targetPercent);
+
+                if (targetPercent > 0.1 && targetPercent < 99.9)
+                {
+                    ProgressPercentBadge.Visibility = Visibility.Visible;
+                    ProgressPercentText.Text = $"{targetPercent:F1}%";
+                }
+                else if (targetPercent >= 99.9)
+                {
+                    ProgressPercentBadge.Visibility = Visibility.Visible;
+                    ProgressPercentText.Text = "100%";
+                }
+                else
+                {
+                    ProgressPercentBadge.Visibility = Visibility.Collapsed;
+                }
+
+                ProgressStatusText.Text = string.IsNullOrEmpty(text) ? $"Status: {targetPercent:F1}%" : text;
+
+                // Indikator aktif unduh (Cyan Glow)
+                ProgressStatusDot.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#06B6D4"));
+                StatusDotGlow.Color = (Color)ColorConverter.ConvertFromString("#06B6D4");
+
+                var telemetryParts = new List<string>();
+                if (!string.IsNullOrEmpty(speed) && speed != "-")
+                    telemetryParts.Add(speed);
+                if (!string.IsNullOrEmpty(sizeDl) && !string.IsNullOrEmpty(sizeTotal) && sizeDl != "-" && sizeTotal != "-")
+                    telemetryParts.Add($"{sizeDl} / {sizeTotal}");
+                if (!string.IsNullOrEmpty(eta) && eta != "-")
+                    telemetryParts.Add(eta.StartsWith("ETA", StringComparison.OrdinalIgnoreCase) ? eta : $"ETA {eta}");
+
+                ProgressStatsText.Text = string.Join("  •  ", telemetryParts);
             };
 
             _bridge.OnInfoData += data =>
@@ -258,6 +289,17 @@ namespace Mavdown.Desktop
                     long views = SafeGetLong(data, "view_count");
                     long likes = SafeGetLong(data, "like_count");
                     string durStr = SafeGetString(data, "duration_string");
+                    if (string.IsNullOrEmpty(durStr))
+                    {
+                        long durSec = SafeGetLong(data, "duration");
+                        if (durSec > 0)
+                        {
+                            var ts = TimeSpan.FromSeconds(durSec);
+                            durStr = ts.TotalHours >= 1 
+                                ? $"{(int)ts.TotalHours}:{ts.Minutes:D2}:{ts.Seconds:D2}"
+                                : $"{ts.Minutes:D2}:{ts.Seconds:D2}";
+                        }
+                    }
 
                     _isCurrentSlide = SafeGetBool(data, "is_slide");
                     _isCurrentUgoira = SafeGetBool(data, "is_ugoira");
@@ -425,7 +467,7 @@ namespace Mavdown.Desktop
                     }
 
                     // Update label mode ekstraksi sesuai tipe media
-                    RadioVideo.Content = _isCurrentSlide ? "Unduh Semua Slide (+ Audio)" : "Video + Audio";
+                    RadioVideo.Content = _isCurrentSlide ? (_currentSlideCount == 1 ? "Unduh Foto HD" : "Unduh Semua Slide (+ Audio)") : "Video + Audio";
 
                     // Render dynamic badges (Gatefold Frosted Glass Pill Tags)
                     BadgesWrapPanel.Children.Clear();
@@ -481,7 +523,7 @@ namespace Mavdown.Desktop
                     }
 
                     UpdatePlatformBadge(platform);
-                    ArtworkPlaceholder.Visibility = Visibility.Collapsed;
+                    ArtworkPlaceholder.Visibility = (MediaThumbnail.Source != null) ? Visibility.Collapsed : Visibility.Visible;
 
                     ApplyStudioModeAdaptation();
 
@@ -606,9 +648,13 @@ namespace Mavdown.Desktop
             _bridge.OnDownloadFinish += () =>
             {
                 BtnDownload.IsEnabled = true;
-                DownloadProgressBar.Value = 100;
+                AnimateProgressBar(100.0, durationMs: 250);
+                ProgressPercentBadge.Visibility = Visibility.Visible;
+                ProgressPercentText.Text = "100%";
                 ProgressStatusText.Text = "Status: Selesai!";
                 ProgressStatsText.Text = "Tersimpan";
+                ProgressStatusDot.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#10B981"));
+                StatusDotGlow.Color = (Color)ColorConverter.ConvertFromString("#10B981");
                 AppendLog("\n[SELESAI] File berhasil diunduh dan diproses.\n");
                 ShowToast("Unduhan selesai!", "success");
             };
@@ -616,7 +662,10 @@ namespace Mavdown.Desktop
             _bridge.OnDownloadError += err =>
             {
                 BtnDownload.IsEnabled = true;
+                ProgressStatusDot.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#EF4444"));
+                StatusDotGlow.Color = (Color)ColorConverter.ConvertFromString("#EF4444");
                 ProgressStatusText.Text = "Status: Gagal Mengunduh";
+                ProgressStatsText.Text = "Error";
                 AppendLog($"\n[ERROR] {err}\n");
                 ShowToast("Unduhan gagal. Buka tab Log untuk detail.", "error");
             };
@@ -642,6 +691,8 @@ namespace Mavdown.Desktop
                             LocalThumbnail = obj["local_thumbnail"]?.ToString() ?? "",
                             IsSlide = obj["is_slide"]?.GetValue<bool>() ?? false,
                             Duration = obj["duration"]?.ToString() ?? "",
+                            Codec = obj["codec"]?.ToString() ?? "",
+                            Fps = obj["fps"]?.ToString() ?? "",
                             SourceUrl = obj["source_url"]?.ToString() ?? "",
                             Timestamp = obj["timestamp"]?.ToString() ?? ""
                         });
@@ -702,6 +753,56 @@ namespace Mavdown.Desktop
                     ShowToast("Sesi Pixiv tidak valid atau kadaluarsa.", "error");
                 }
             };
+
+            _bridge.OnBilibiliLoginStatus += msg =>
+            {
+                TxtBilibiliStatus.Text = $"Status: {msg}";
+                TxtBilibiliStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#9CA3AF"));
+                if (msg.Contains("login", StringComparison.OrdinalIgnoreCase) && !msg.Contains("terdeteksi", StringComparison.OrdinalIgnoreCase))
+                {
+                    BtnLoginBrowserBilibili.Content = "Menunggu Login...";
+                }
+            };
+
+            _bridge.OnBilibiliLoginComplete += (success, result, userName) =>
+            {
+                BtnLoginBrowserBilibili.IsEnabled = true;
+                BtnLoginBrowserBilibili.Content = "Login Browser";
+
+                if (success && !string.IsNullOrEmpty(result))
+                {
+                    _rawBilibiliSession = result;
+                    SettingsBilibiliBox.Text = _isBilibiliMasked ? new string('•', result.Length) : result;
+                    ShowToast("Login berhasil! Memverifikasi sesi Bilibili...", "info");
+                    VerifyAndSaveBilibiliSession(result);
+                }
+                else
+                {
+                    string errMsg = !string.IsNullOrEmpty(result) ? result : "Login Bilibili dibatalkan atau gagal.";
+                    TxtBilibiliStatus.Text = $"Status: {errMsg}";
+                    TxtBilibiliStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#EF4444"));
+                    ShowToast(errMsg, "warning");
+                }
+            };
+
+            _bridge.OnBilibiliVerifyResult += (isValid, userInfo) =>
+            {
+                BtnSaveBilibiliSession.IsEnabled = true;
+                BtnSaveBilibiliSession.Content = "Simpan & Cek";
+
+                if (isValid)
+                {
+                    TxtBilibiliStatus.Text = $"Status: Terhubung ({userInfo})";
+                    TxtBilibiliStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#34D399"));
+                    ShowToast($"Sesi Bilibili berhasil terhubung: {userInfo}", "success");
+                }
+                else
+                {
+                    TxtBilibiliStatus.Text = $"Status: {userInfo}";
+                    TxtBilibiliStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#EF4444"));
+                    ShowToast("Sesi Bilibili tidak valid atau kadaluarsa.", "error");
+                }
+            };
         }
 
         private void LoadInitialLocalConfig()
@@ -739,7 +840,15 @@ namespace Mavdown.Desktop
             {
                 if (cfg["output_dir"] != null || cfg["output_path"] != null)
                 {
-                    _outputFolder = (cfg["output_dir"] ?? cfg["output_path"])!.ToString();
+                    string rawPath = (cfg["output_dir"] ?? cfg["output_path"])!.ToString();
+                    try
+                    {
+                        _outputFolder = Path.GetFullPath(rawPath.Trim().Replace('/', '\\'));
+                    }
+                    catch
+                    {
+                        _outputFolder = rawPath.Trim().Replace('/', '\\');
+                    }
                     SettingsPathBox.Text = _outputFolder;
                     SidebarPathText.Text = _outputFolder;
                 }
@@ -776,7 +885,14 @@ namespace Mavdown.Desktop
                     SettingsPixivBox.Text = _isPixivMasked ? (string.IsNullOrEmpty(_rawPixivSession) ? "" : new string('•', _rawPixivSession.Length)) : _rawPixivSession;
                     if (TxtPixivStatus != null)
                     {
-                        if (!string.IsNullOrEmpty(_rawPixivSession))
+                        string pixivAccount = cfg["pixiv_account_name"]?.ToString() ?? "";
+                        if (!string.IsNullOrEmpty(pixivAccount))
+                        {
+                            string pixivLabel = pixivAccount.StartsWith("Terhubung") ? pixivAccount : $"Terhubung sebagai {pixivAccount}";
+                            TxtPixivStatus.Text = $"Status: Terhubung ({pixivLabel})";
+                            TxtPixivStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#34D399"));
+                        }
+                        else if (!string.IsNullOrEmpty(_rawPixivSession))
                         {
                             TxtPixivStatus.Text = "Status: Sesi Tersimpan";
                             TxtPixivStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#34D399"));
@@ -785,6 +901,31 @@ namespace Mavdown.Desktop
                         {
                             TxtPixivStatus.Text = "Status: Belum Terhubung (Sesi Kosong)";
                             TxtPixivStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#6B7280"));
+                        }
+                    }
+                }
+                if (cfg["bilibili_session"] != null)
+                {
+                    _rawBilibiliSession = cfg["bilibili_session"]!.ToString();
+                    SettingsBilibiliBox.Text = _isBilibiliMasked ? (string.IsNullOrEmpty(_rawBilibiliSession) ? "" : new string('•', _rawBilibiliSession.Length)) : _rawBilibiliSession;
+                    if (TxtBilibiliStatus != null)
+                    {
+                        string biliAccount = cfg["bilibili_account_name"]?.ToString() ?? "";
+                        if (!string.IsNullOrEmpty(biliAccount))
+                        {
+                            string biliLabel = biliAccount.StartsWith("Terhubung") ? biliAccount : $"Terhubung sebagai {biliAccount}";
+                            TxtBilibiliStatus.Text = $"Status: Terhubung ({biliLabel})";
+                            TxtBilibiliStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#34D399"));
+                        }
+                        else if (!string.IsNullOrEmpty(_rawBilibiliSession))
+                        {
+                            TxtBilibiliStatus.Text = "Status: Sesi Tersimpan";
+                            TxtBilibiliStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#34D399"));
+                        }
+                        else
+                        {
+                            TxtBilibiliStatus.Text = "Status: Belum Terhubung (Sesi Kosong)";
+                            TxtBilibiliStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#6B7280"));
                         }
                     }
                 }
@@ -853,12 +994,14 @@ namespace Mavdown.Desktop
                 else
                 {
                     FormatTitleLabel.Text = RadioAudio.IsChecked == true ? "PARAMETER FORMAT AUDIO (BGM)" : (_currentSlideCount == 1 ? "PARAMETER FOTO HD" : "PARAMETER ALBUM SLIDE FOTO");
-                    SlideBannerTitle.Text = "MODE ALBUM SLIDE FOTO";
+                    SlideBannerTitle.Text = _currentSlideCount == 1 ? "MODE FOTO HD" : "MODE ALBUM SLIDE FOTO";
                     SlideBadgeLbl.Text = "HD Original";
                     SlideBadgeBox.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#312E81"));
-                    SlideStatusLbl.Text = "MavDown akan mengunduh semua file gambar asli HD tanpa watermark ke subfolder album khusus beserta file musik BGM.";
+                    SlideStatusLbl.Text = _currentSlideCount == 1
+                        ? "MavDown akan mengunduh gambar asli resolusi penuh HD tanpa watermark langsung ke subfolder khusus."
+                        : "MavDown akan mengunduh semua file gambar asli HD tanpa watermark ke subfolder album khusus beserta file musik BGM.";
                     SlidePCount.Text = _currentSlideCount == 1 ? "Total: 1 Foto HD" : (_currentSlideCount > 0 ? $"Total: {_currentSlideCount} Foto Slide" : "Total: Album Slide");
-                    SlidePFormat.Text = "Format: JPEG HD (Lossless)";
+                    SlidePFormat.Text = "Format: JPEG/PNG HD (Lossless)";
                     SlidePRes.Text = (_currentWidth > 0 && _currentHeight > 0) ? $"Dimensi: {_currentWidth}x{_currentHeight} (Asli)" : "Dimensi: HD Original";
                     SlidePAudio.Text = _currentHasAudio ? "Audio: Musik BGM (.mp3)" : "Audio: Tanpa Musik";
                     UgoiraContainer.Visibility = Visibility.Collapsed;
@@ -1095,7 +1238,7 @@ namespace Mavdown.Desktop
         {
             if (RadVCodecH264.IsChecked == true) return "h264";
             if (RadVCodecVp9.IsChecked == true) return "vp9";
-            if (RadVCodecAv1.IsChecked == true) return "av01";
+            if (RadVCodecAv1.IsChecked == true) return "av1";
             return "auto";
         }
 
@@ -1181,7 +1324,11 @@ namespace Mavdown.Desktop
 
             BtnDownload.IsEnabled = false;
             ProgressStatusText.Text = "Status: Memulai unduhan...";
-            DownloadProgressBar.Value = 0;
+            ProgressStatsText.Text = "";
+            ProgressPercentBadge.Visibility = Visibility.Collapsed;
+            ProgressStatusDot.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#38BDF8"));
+            StatusDotGlow.Color = (Color)ColorConverter.ConvertFromString("#38BDF8");
+            AnimateProgressBar(0.0, durationMs: 0);
 
             string mode = RadioAudio.IsChecked == true ? "audio" : "video";
             string audioFormat = GetSelectedAudioFormat();
@@ -1305,23 +1452,24 @@ namespace Mavdown.Desktop
             Dispatcher.Invoke(() =>
             {
                 var activeBg = (Brush)FindResource("BrushNavActiveBg");
+                var activeBorder = (Brush)FindResource("BrushNavActiveBorder");
                 var activeFg = (Brush)FindResource("BrushNavActiveFg");
                 var mutedFg = (Brush)FindResource("BrushTextMuted");
 
-                TabStudioBtn.Background = _currentTabIndex == 0 ? activeBg : Brushes.Transparent;
-                TxtNavStudio.Foreground = _currentTabIndex == 0 ? activeFg : mutedFg;
+                void SetTabState(Border btn, TextBlock txt, bool isActive)
+                {
+                    btn.Background = isActive ? activeBg : Brushes.Transparent;
+                    btn.BorderBrush = isActive ? activeBorder : Brushes.Transparent;
+                    btn.BorderThickness = new Thickness(1);
+                    txt.Foreground = isActive ? activeFg : mutedFg;
+                    txt.FontWeight = isActive ? FontWeights.Bold : FontWeights.SemiBold;
+                }
 
-                TabQueueBtn.Background = _currentTabIndex == 1 ? activeBg : Brushes.Transparent;
-                TxtNavQueue.Foreground = _currentTabIndex == 1 ? activeFg : mutedFg;
-
-                TabHistoryBtn.Background = _currentTabIndex == 2 ? activeBg : Brushes.Transparent;
-                TxtNavHistory.Foreground = _currentTabIndex == 2 ? activeFg : mutedFg;
-
-                TabLogBtn.Background = _currentTabIndex == 3 ? activeBg : Brushes.Transparent;
-                TxtNavLog.Foreground = _currentTabIndex == 3 ? activeFg : mutedFg;
-
-                TabSettingsBtn.Background = _currentTabIndex == 4 ? activeBg : Brushes.Transparent;
-                TxtNavSettings.Foreground = _currentTabIndex == 4 ? activeFg : mutedFg;
+                SetTabState(TabStudioBtn, TxtNavStudio, _currentTabIndex == 0);
+                SetTabState(TabQueueBtn, TxtNavQueue, _currentTabIndex == 1);
+                SetTabState(TabHistoryBtn, TxtNavHistory, _currentTabIndex == 2);
+                SetTabState(TabLogBtn, TxtNavLog, _currentTabIndex == 3);
+                SetTabState(TabSettingsBtn, TxtNavSettings, _currentTabIndex == 4);
             });
         }
 
@@ -1531,13 +1679,14 @@ namespace Mavdown.Desktop
             {
                 try
                 {
-                    if (File.Exists(fpath))
+                    string normPath = fpath.Trim().Replace('/', '\\');
+                    if (File.Exists(normPath))
                     {
-                        Process.Start("explorer.exe", $"/select,\"{fpath}\"");
+                        Process.Start("explorer.exe", $"/select,\"{normPath}\"");
                     }
-                    else if (Directory.Exists(fpath))
+                    else if (Directory.Exists(normPath))
                     {
-                        Process.Start("explorer.exe", fpath);
+                        Process.Start(new ProcessStartInfo { FileName = normPath, UseShellExecute = true });
                     }
                     else
                     {
@@ -1551,44 +1700,70 @@ namespace Mavdown.Desktop
             }
         }
 
+        private void OnCopyHistoryUrlClick(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string url && !string.IsNullOrWhiteSpace(url))
+            {
+                try
+                {
+                    Clipboard.SetText(url);
+                    ShowToast("Tautan sumber disalin ke clipboard.", "info");
+                }
+                catch (Exception ex)
+                {
+                    AppendLog($"[CLIPBOARD] Gagal menyalin tautan: {ex.Message}\n");
+                }
+            }
+        }
+
+        private DateTime _lastClearHistoryClickTime = DateTime.MinValue;
+
         private async void OnDeleteHistoryItemClick(object sender, RoutedEventArgs e)
         {
             if (sender is Button btn && btn.Tag is string entryId && !string.IsNullOrEmpty(entryId))
             {
-                var result = MessageBox.Show(
-                    "Hapus entri ini dari riwayat?",
-                    "Konfirmasi Hapus",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question
-                );
-
-                if (result == MessageBoxResult.Yes)
+                await _bridge.SendCommandAsync(new
                 {
-                    await _bridge.SendCommandAsync(new
-                    {
-                        action = "delete_history",
-                        entry_id = entryId,
-                        delete_file = false
-                    });
-                    await _bridge.RequestHistoryAsync(HistorySearchInput.Text.Trim());
-                }
+                    action = "delete_history",
+                    entry_id = entryId,
+                    delete_file = false
+                });
+                await _bridge.RequestHistoryAsync(HistorySearchInput.Text.Trim());
+                ShowToast("Entri riwayat berhasil dihapus.", "info");
             }
         }
 
         private async void OnClearHistoryClick(object sender, RoutedEventArgs e)
         {
-            var result = MessageBox.Show(
-                "Apakah Anda yakin ingin membersihkan seluruh riwayat unduhan?",
-                "Bersihkan Riwayat",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning
-            );
-
-            if (result == MessageBoxResult.Yes)
+            if (sender is Button btn)
             {
-                await _bridge.SendCommandAsync(new { action = "clear_history" });
-                await _bridge.RequestHistoryAsync();
-                ShowToast("Seluruh riwayat unduhan telah dibersihkan.", "info");
+                var now = DateTime.Now;
+                if ((now - _lastClearHistoryClickTime).TotalSeconds < 4)
+                {
+                    _lastClearHistoryClickTime = DateTime.MinValue;
+                    btn.Content = "Bersihkan Riwayat";
+                    await _bridge.SendCommandAsync(new { action = "clear_history" });
+                    await _bridge.RequestHistoryAsync();
+                    ShowToast("Seluruh riwayat unduhan telah dibersihkan.", "info");
+                }
+                else
+                {
+                    _lastClearHistoryClickTime = now;
+                    btn.Content = "Yakin Bersihkan?";
+                    ShowToast("Klik 'Yakin Bersihkan?' sekali lagi untuk menghapus seluruh riwayat.", "warning");
+
+                    var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+                    timer.Tick += (s, ev) =>
+                    {
+                        timer.Stop();
+                        if (btn.Content?.ToString() == "Yakin Bersihkan?")
+                        {
+                            btn.Content = "Bersihkan Riwayat";
+                            _lastClearHistoryClickTime = DateTime.MinValue;
+                        }
+                    };
+                    timer.Start();
+                }
             }
         }
         #endregion
@@ -1632,13 +1807,35 @@ namespace Mavdown.Desktop
         {
             try
             {
-                if (!Directory.Exists(_outputFolder))
-                    Directory.CreateDirectory(_outputFolder);
-                Process.Start("explorer.exe", _outputFolder);
+                string targetDir = string.IsNullOrWhiteSpace(_outputFolder)
+                    ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "Mavdown")
+                    : _outputFolder.Trim().Replace('/', '\\');
+
+                try
+                {
+                    targetDir = Path.GetFullPath(targetDir);
+                }
+                catch { }
+
+                if (!Directory.Exists(targetDir))
+                    Directory.CreateDirectory(targetDir);
+
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = targetDir,
+                    UseShellExecute = true
+                });
             }
             catch (Exception ex)
             {
-                AppendLog($"[EXPLORER] Gagal membuka folder: {ex.Message}\n");
+                try
+                {
+                    Process.Start("explorer.exe", $"\"{_outputFolder.Replace('/', '\\')}\"");
+                }
+                catch
+                {
+                    AppendLog($"[EXPLORER] Gagal membuka folder: {ex.Message}\n");
+                }
             }
         }
 
@@ -1889,6 +2086,94 @@ namespace Mavdown.Desktop
             ShowToast("Sesi Pixiv berhasil dihapus.", "info");
         }
 
+        private void OnToggleBilibiliMaskClick(object sender, RoutedEventArgs e)
+        {
+            _isBilibiliMasked = !_isBilibiliMasked;
+            if (_isBilibiliMasked)
+            {
+                BtnToggleBilibiliMask.Content = "Lihat";
+                _rawBilibiliSession = SettingsBilibiliBox.Text;
+                SettingsBilibiliBox.Text = string.IsNullOrEmpty(_rawBilibiliSession) ? "" : new string('•', _rawBilibiliSession.Length);
+            }
+            else
+            {
+                BtnToggleBilibiliMask.Content = "Sembunyikan";
+                if (!string.IsNullOrEmpty(_rawBilibiliSession))
+                    SettingsBilibiliBox.Text = _rawBilibiliSession;
+            }
+        }
+
+        private void OnSaveBilibiliSessionClick(object sender, RoutedEventArgs e)
+        {
+            string session = _isBilibiliMasked && !string.IsNullOrEmpty(_rawBilibiliSession)
+                ? _rawBilibiliSession
+                : SettingsBilibiliBox.Text.Trim();
+
+            if (string.IsNullOrEmpty(session))
+            {
+                ShowToast("Sesi Bilibili tidak boleh kosong.", "warning");
+                return;
+            }
+
+            VerifyAndSaveBilibiliSession(session);
+        }
+
+        private async void VerifyAndSaveBilibiliSession(string session)
+        {
+            if (string.IsNullOrWhiteSpace(session))
+            {
+                ShowToast("Sesi Bilibili tidak boleh kosong.", "warning");
+                return;
+            }
+
+            BtnSaveBilibiliSession.IsEnabled = false;
+            BtnSaveBilibiliSession.Content = "Memeriksa...";
+            TxtBilibiliStatus.Text = "Status: Memverifikasi sesi...";
+            TxtBilibiliStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#9CA3AF"));
+
+            if (_bridge != null)
+            {
+                await _bridge.SendCommandAsync(new
+                {
+                    action = "set_config",
+                    key = "bilibili_session",
+                    value = session
+                });
+                await _bridge.VerifyBilibiliSessionAsync(session);
+            }
+        }
+
+        private async void OnLoginBrowserBilibiliClick(object sender, RoutedEventArgs e)
+        {
+            BtnLoginBrowserBilibili.IsEnabled = false;
+            BtnLoginBrowserBilibili.Content = "Membuka Browser...";
+            TxtBilibiliStatus.Text = "Status: Membuka jendela login browser...";
+            TxtBilibiliStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#9CA3AF"));
+
+            if (_bridge != null)
+            {
+                await _bridge.BilibiliLoginBrowserAsync();
+            }
+        }
+
+        private async void OnClearBilibiliSessionClick(object sender, RoutedEventArgs e)
+        {
+            _rawBilibiliSession = "";
+            SettingsBilibiliBox.Text = "";
+            if (_bridge != null)
+            {
+                await _bridge.SendCommandAsync(new
+                {
+                    action = "set_config",
+                    key = "bilibili_session",
+                    value = ""
+                });
+            }
+            TxtBilibiliStatus.Text = "Status: Belum Terhubung (Sesi Kosong)";
+            TxtBilibiliStatus.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#6B7280"));
+            ShowToast("Sesi Bilibili berhasil dihapus.", "info");
+        }
+
         private void OnOpenGitHubRepoClick(object sender, RoutedEventArgs e)
         {
             try
@@ -2035,6 +2320,31 @@ namespace Mavdown.Desktop
                     CoverPaletteSwatchesPanel.Children.Add(swatchBorder);
                 }
             });
+        }
+
+        private void AnimateProgressBar(double targetPercent, double durationMs = 300)
+        {
+            targetPercent = Math.Clamp(targetPercent, 0.0, 100.0);
+
+            if (targetPercent <= 0.0)
+            {
+                DownloadProgressBar.BeginAnimation(ProgressBar.ValueProperty, null);
+                DownloadProgressBar.Value = 0.0;
+                return;
+            }
+
+            double currentVal = DownloadProgressBar.Value;
+            if (Math.Abs(currentVal - targetPercent) < 0.2)
+                return;
+
+            var anim = new DoubleAnimation
+            {
+                From = currentVal,
+                To = targetPercent,
+                Duration = TimeSpan.FromMilliseconds(durationMs),
+                EasingFunction = new QuarticEase { EasingMode = EasingMode.EaseOut }
+            };
+            DownloadProgressBar.BeginAnimation(ProgressBar.ValueProperty, anim);
         }
         #endregion
         #endregion

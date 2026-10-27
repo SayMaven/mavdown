@@ -5,7 +5,7 @@ import requests
 from engines.base import (
     DEFAULT_HEADERS, sanitize_filename, stream_download_file,
     fast_remux_mp4, extract_audio_from_video, embed_thumbnail_to_media,
-    probe_media_stream
+    probe_media_stream, postprocess_video
 )
 
 def extract_meta_content(html_text: str, prop: str) -> str:
@@ -242,14 +242,18 @@ def download_pinterest(url: str, output_dir: str, ui_queue=None, options=None, a
             if ui_queue:
                 ui_queue.put({"type": "log", "text": "[TIER 1] Menemukan stream video Pinterest MP4.\n"})
 
+            raw_container = options.get('container', 'auto') if options else 'auto'
+            container = 'mp4' if raw_container in ('auto', 'best', '', None) else str(raw_container).lower()
+            ext = f".{container}"
+
             raw_path = os.path.join(output_dir, f"{base_name}_raw.mp4")
-            final_path = os.path.join(output_dir, f"{base_name}.mp4")
+            final_path = os.path.join(output_dir, f"{base_name}{ext}")
 
             success = stream_download_file(video_url, raw_path, ui_queue, abort_checker, label="Unduh Video Pinterest")
             if not success:
                 return False
 
-            fast_remux_mp4(raw_path, final_path)
+            postprocess_video(raw_path, final_path, options, ui_queue, abort_checker)
 
             saved_path = final_path
             if mode == 'audio_only':

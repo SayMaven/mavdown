@@ -17,6 +17,10 @@
         RenderOptions.ClearTypeHint="Enabled"
         UseLayoutRounding="True">
 
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </Window.Resources>
+
     <Grid>
         <Grid.ColumnDefinitions>
             <!-- 1. Left Sidebar Navigation (260px) -->
@@ -107,10 +111,10 @@
                 <StackPanel Grid.Row="2">
                     <TextBlock Text="PRESET CEPAT" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource BrushTextDim}" Margin="4,0,0,6" />
 
-                    <Button Content="Super Quality" Background="#4338CA" Foreground="#F3F4F6" Height="32" Margin="0,2" Style="{StaticResource StdButton}" HorizontalContentAlignment="Left" Padding="12,0" Click="OnPresetSuperQualityClick" />
-                    <Button Content="Musik MP3" Background="#6D28D9" Foreground="#F3F4F6" Height="32" Margin="0,2" Style="{StaticResource StdButton}" HorizontalContentAlignment="Left" Padding="12,0" Click="OnPresetMusikMp3Click" />
-                    <Button Content="Hemat Data" Background="#0E7490" Foreground="#F3F4F6" Height="32" Margin="0,2" Style="{StaticResource StdButton}" HorizontalContentAlignment="Left" Padding="12,0" Click="OnPresetHematDataClick" />
-                    <Button Content="Podcast" Background="#047857" Foreground="#F3F4F6" Height="32" Margin="0,2" Style="{StaticResource StdButton}" HorizontalContentAlignment="Left" Padding="12,0" Click="OnPresetPodcastClick" />
+                    <Button Style="{StaticResource PresetSuperQualityBtn}" Click="OnPresetSuperQualityClick" />
+                    <Button Style="{StaticResource PresetMusikMp3Btn}" Click="OnPresetMusikMp3Click" />
+                    <Button Style="{StaticResource PresetHematDataBtn}" Click="OnPresetHematDataClick" />
+                    <Button Style="{StaticResource PresetPodcastBtn}" Click="OnPresetPodcastClick" />
 
                     <TextBlock Text="Preset mengatur format, codec, dan resolusi secara otomatis." FontSize="9" Foreground="{DynamicResource BrushTextDim}" TextWrapping="Wrap" Margin="4,6,0,0" />
                 </StackPanel>
@@ -118,19 +122,19 @@
                 <!-- ── Bottom System Status Card ── -->
                 <Border Grid.Row="4" Background="{DynamicResource BrushGatefoldInner}" BorderBrush="{DynamicResource BrushGatefoldInnerBorder}" BorderThickness="1" CornerRadius="10" Padding="14,12" Margin="0,10,0,0">
                     <StackPanel>
-                        <TextBlock Text="Lokasi Simpan:" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource BrushTextDim}" Margin="0,0,0,3" />
-                        <TextBlock x:Name="SidebarPathText" Text="Downloads\Mavdown" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource BrushTextAccent}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                        <TextBlock Text="Lokasi Simpan:" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource BrushTextDim}" Margin="0,0,0,4" />
+                        <TextBlock x:Name="SidebarPathText" Text="Downloads\Mavdown" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource BrushTextAccent}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" Margin="0,0,0,10" />
 
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <Button Content="Ubah" Height="28" Margin="0,0,3,0" Style="{StaticResource GhostButton}" Click="OnSelectFolderClick" />
-                            <Button Grid.Column="1" Content="Buka" Height="28" Margin="3,0,0,0" Style="{StaticResource GhostButton}" Click="OnOpenFolderClick" />
+                            <Button Content="Ubah" Height="30" Margin="0,0,3,0" Style="{StaticResource GhostButton}" Click="OnSelectFolderClick" />
+                            <Button Grid.Column="1" Content="Buka" Height="30" Margin="3,0,0,0" Style="{StaticResource GhostButton}" Click="OnOpenFolderClick" />
                         </Grid>
 
-                        <Button x:Name="SidebarUpdateBtn" Content="Update yt-dlp" Height="30" Style="{StaticResource AmberButton}" Click="OnUpdateYtdlpClick" />
+                        <Button x:Name="SidebarUpdateBtn" Content="Update yt-dlp" Height="32" Style="{StaticResource AmberButton}" Click="OnUpdateYtdlpClick" />
                     </StackPanel>
                 </Border>
             </Grid>
@@ -731,8 +735,12 @@
                                 <Button Grid.Column="1" Content="Reset" Width="60" Height="36" Margin="8,0,0,0" Style="{StaticResource GhostButton}" Click="OnResetSearchClick" />
                             </Grid>
 
-                            <!-- History Cards List -->
-                            <ListBox x:Name="HistoryListBox" Grid.Row="2" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox x:Name="HistoryListBox" Grid.Row="2" Background="Transparent" BorderThickness="0" 
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     VirtualizingPanel.IsVirtualizing="True"
+                                     VirtualizingPanel.VirtualizationMode="Recycling"
+                                     VirtualizingPanel.ScrollUnit="Pixel"
+                                     ScrollViewer.CanContentScroll="True">
                                 <ListBox.ItemContainerStyle>
                                     <Style TargetType="ListBoxItem">
                                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -749,35 +757,93 @@
                                 </ListBox.ItemContainerStyle>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate DataType="{x:Type models:HistoryItem}">
-                                        <Border Background="{DynamicResource BrushCardInner}" CornerRadius="10" BorderBrush="{DynamicResource BrushBorderDark}" BorderThickness="1" Padding="12">
+                                        <Border Background="{DynamicResource BrushCardInner}" CornerRadius="10" BorderBrush="{DynamicResource BrushBorderLight}" BorderThickness="1" Padding="12,10" Margin="0,0,0,2">
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="120" />
+                                                    <ColumnDefinition Width="130" />
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
 
-                                                <!-- Thumbnail (Letterbox aspect fit, no crop/zoom) -->
-                                                <Border Grid.Column="0" Width="110" Height="68" CornerRadius="6" Background="{DynamicResource BrushGatefoldSegmentBg}" ClipToBounds="True">
-                                                    <Image Source="{Binding ThumbnailImage}" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" />
-                                                </Border>
+                                                <!-- Thumbnail with Badges -->
+                                                <Grid Grid.Column="0" Width="124" Height="76">
+                                                    <Border CornerRadius="6" Background="{DynamicResource BrushGatefoldSegmentBg}" ClipToBounds="True">
+                                                        <Grid>
+                                                            <!-- Placeholder text if no image -->
+                                                            <TextBlock Text="MEDIA" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource BrushTextDim}" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.4" />
+                                                            <Image Source="{Binding ThumbnailImage}" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" />
+                                                        </Grid>
+                                                    </Border>
 
-                                                <!-- Info -->
-                                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="14,0">
-                                                    <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource BrushTextTitle}" TextTrimming="CharacterEllipsis" Margin="0,0,0,4" />
-                                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                                        <Border Style="{StaticResource PillBadge}" Margin="0,0,6,0"><TextBlock Text="{Binding Platform}" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource BrushTextAccent}" /></Border>
-                                                        <TextBlock Text="{Binding Resolution}" FontSize="11" Foreground="{DynamicResource BrushTextMuted}" Margin="0,0,8,0" VerticalAlignment="Center" />
-                                                        <TextBlock Text="{Binding Duration}" FontSize="11" Foreground="{DynamicResource BrushTextMuted}" Margin="0,0,8,0" VerticalAlignment="Center" />
-                                                        <TextBlock Text="{Binding Timestamp}" FontSize="11" Foreground="{DynamicResource BrushTextDim}" VerticalAlignment="Center" />
+                                                    <!-- Top-Left Pill: Media Format (MP4 / MP3 / SLIDE) -->
+                                                    <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="5,5,0,0" Padding="5,1" CornerRadius="3" Background="#D90B0D14" BorderBrush="#33FFFFFF" BorderThickness="1" Visibility="{Binding HasMediaFormat, Converter={StaticResource BoolToVis}}">
+                                                        <TextBlock Text="{Binding MediaFormat}" FontSize="8" FontWeight="Bold" Foreground="#E2E8F0" />
+                                                    </Border>
+
+                                                    <!-- Bottom-Right Pill: Duration / Photo Count -->
+                                                    <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,5,5" Padding="5,2" CornerRadius="3" Background="#E6000000" Visibility="{Binding HasDuration, Converter={StaticResource BoolToVis}}">
+                                                        <TextBlock Text="{Binding DisplayDuration}" FontSize="9" FontWeight="Bold" Foreground="#FFFFFF" />
+                                                    </Border>
+                                                </Grid>
+
+                                                <!-- Info Studio -->
+                                                <Grid Grid.Column="1" VerticalAlignment="Center" Margin="14,0,12,0">
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
+
+                                                    <!-- Row 1: Title -->
+                                                    <TextBlock Grid.Row="0" Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource BrushTextTitle}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Title}" Margin="0,0,0,6" />
+
+                                                    <!-- Row 2: Badges & Chips -->
+                                                    <WrapPanel Grid.Row="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,6">
+                                                        <!-- Platform Badge with Brand Color -->
+                                                        <Border Background="{Binding PlatformBgBrush}" BorderBrush="{Binding PlatformBorderBrush}" BorderThickness="1" CornerRadius="4" Padding="7,2" Margin="0,0,6,0">
+                                                            <TextBlock Text="{Binding PlatformBadgeText}" FontSize="9" FontWeight="Bold" Foreground="{Binding PlatformColorBrush}" />
+                                                        </Border>
+
+                                                        <!-- Resolution Badge -->
+                                                        <Border Background="#182030" BorderBrush="#253248" BorderThickness="1" CornerRadius="4" Padding="6,2" Margin="0,0,6,0" Visibility="{Binding HasResolution, Converter={StaticResource BoolToVis}}">
+                                                            <TextBlock Text="{Binding Resolution}" FontSize="10" FontWeight="SemiBold" Foreground="#E2E8F0" />
+                                                        </Border>
+
+                                                        <!-- FPS Badge -->
+                                                        <Border Background="#182030" BorderBrush="#253248" BorderThickness="1" CornerRadius="4" Padding="6,2" Margin="0,0,6,0" Visibility="{Binding HasFps, Converter={StaticResource BoolToVis}}">
+                                                            <TextBlock Text="{Binding Fps}" FontSize="10" FontWeight="SemiBold" Foreground="#94A3B8" />
+                                                        </Border>
+
+                                                        <!-- Codec Badge -->
+                                                        <Border Background="#122538" BorderBrush="#1E3E5D" BorderThickness="1" CornerRadius="4" Padding="6,2" Margin="0,0,6,0" Visibility="{Binding HasCodec, Converter={StaticResource BoolToVis}}">
+                                                            <TextBlock Text="{Binding Codec}" FontSize="10" FontWeight="SemiBold" Foreground="#38BDF8" />
+                                                        </Border>
+
+                                                        <!-- File Size Badge -->
+                                                        <Border Background="#132B26" BorderBrush="#1F4E42" BorderThickness="1" CornerRadius="4" Padding="6,2" Margin="0,0,6,0" Visibility="{Binding HasFileSize, Converter={StaticResource BoolToVis}}">
+                                                            <TextBlock Text="{Binding FileSize}" FontSize="10" FontWeight="SemiBold" Foreground="#34D399" />
+                                                        </Border>
+
+                                                        <!-- Author Info -->
+                                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,6,0" Visibility="{Binding HasAuthor, Converter={StaticResource BoolToVis}}">
+                                                            <TextBlock Text="Kreator: " FontSize="10" Foreground="{DynamicResource BrushTextDim}" />
+                                                            <TextBlock Text="{Binding Author}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource BrushTextMuted}" MaxWidth="160" TextTrimming="CharacterEllipsis" ToolTip="{Binding Author}" />
+                                                        </StackPanel>
+                                                    </WrapPanel>
+
+                                                    <!-- Row 3: Timestamp & Local File Path -->
+                                                    <StackPanel Grid.Row="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Timestamp}" FontSize="10" Foreground="{DynamicResource BrushTextDim}" Margin="0,0,6,0" />
+                                                        <TextBlock Text="•" FontSize="10" Foreground="{DynamicResource BrushTextDim}" Margin="0,0,6,0" />
+                                                        <TextBlock Text="{Binding FilePath}" FontSize="10" Foreground="{DynamicResource BrushTextDim}" TextTrimming="CharacterEllipsis" ToolTip="{Binding FilePath}" MaxWidth="500" />
                                                     </StackPanel>
-                                                    <TextBlock Text="{Binding FilePath}" FontSize="10" Foreground="{DynamicResource BrushTextDim}" TextTrimming="CharacterEllipsis" />
-                                                </StackPanel>
+                                                </Grid>
 
                                                 <!-- Action Buttons -->
                                                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                                    <Button Content="{Binding PlayButtonLabel}" Style="{StaticResource IndigoButton}" Padding="14,6" Height="30" FontSize="11" Margin="0,0,6,0" Tag="{Binding FilePath}" Click="OnPlayHistoryItemClick" />
+                                                    <Button Content="{Binding PlayButtonLabel}" Style="{StaticResource IndigoButton}" Padding="14,6" Height="30" FontSize="11" FontWeight="SemiBold" Margin="0,0,6,0" Tag="{Binding FilePath}" Click="OnPlayHistoryItemClick" />
                                                     <Button Content="Folder" Style="{StaticResource GhostButton}" Padding="12,6" Height="30" FontSize="11" Margin="0,0,6,0" Tag="{Binding FilePath}" Click="OnOpenHistoryFolderClick" />
+                                                    <Button Content="Salin Link" Style="{StaticResource GhostButton}" Padding="10,6" Height="30" FontSize="11" Margin="0,0,6,0" Tag="{Binding SourceUrl}" Click="OnCopyHistoryUrlClick" Visibility="{Binding HasSourceUrl, Converter={StaticResource BoolToVis}}" />
                                                     <Button Content="Hapus" Style="{StaticResource RoseButton}" Padding="10,6" Height="30" FontSize="11" Tag="{Binding Id}" Click="OnDeleteHistoryItemClick" />
                                                 </StackPanel>
                                             </Grid>
@@ -806,7 +872,7 @@
                                 </StackPanel>
                             </Grid>
 
-                            <TextBox x:Name="LogConsoleFull" Grid.Row="1" Background="{DynamicResource BrushGatefoldSegmentBg}" BorderBrush="{DynamicResource BrushBorderDark}" Foreground="{DynamicResource BrushTextBody}" FontFamily="Consolas, monospace" FontSize="11" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Padding="12" />
+                            <TextBox x:Name="LogConsoleFull" Grid.Row="1" Background="{DynamicResource BrushGatefoldSegmentBg}" BorderBrush="{DynamicResource BrushBorderDark}" Foreground="{DynamicResource BrushTextBody}" FontFamily="Consolas, monospace" FontSize="11" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="12" />
                         </Grid>
                     </Border>
                 </Grid>
@@ -899,8 +965,8 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBox x:Name="SettingsProxyBox" Background="{DynamicResource BrushGatefoldSegmentBg}" BorderBrush="{DynamicResource BrushBorderDark}" Foreground="{DynamicResource BrushTextBody}" FontSize="11" Height="34" Padding="10,6" />
-                                            <Button Grid.Column="1" Content="Simpan Proxy" Width="100" Height="34" Style="{StaticResource IndigoButton}" Margin="8,0,0,0" Click="OnSaveProxyClick" />
+                                            <TextBox x:Name="SettingsProxyBox" Background="{DynamicResource BrushGatefoldSegmentBg}" BorderBrush="{DynamicResource BrushBorderDark}" Foreground="{DynamicResource BrushTextBody}" FontSize="11" Height="36" Padding="10,8" />
+                                            <Button Grid.Column="1" Content="Simpan Proxy" Width="120" Height="36" Style="{StaticResource IndigoButton}" Margin="8,0,0,0" Click="OnSaveProxyClick" />
                                         </Grid>
                                         <TextBlock Text="Contoh: http://127.0.0.1:7890 atau socks5://127.0.0.1:1080 (Kosongkan jika tidak menggunakan proxy)." FontSize="10" Foreground="{DynamicResource BrushTextDim}" />
                                     </StackPanel>
@@ -919,13 +985,36 @@
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
                                             <TextBox x:Name="SettingsPixivBox" Background="{DynamicResource BrushGatefoldSegmentBg}" BorderBrush="{DynamicResource BrushBorderDark}" Foreground="{DynamicResource BrushTextBody}" FontSize="11" Height="36" Padding="10,8" />
-                                            <Button x:Name="BtnTogglePixivMask" Grid.Column="1" Content="Lihat" Width="64" Height="36" Style="{StaticResource GhostButton}" Margin="6,0,0,0" Click="OnTogglePixivMaskClick" />
-                                            <Button x:Name="BtnSavePixivSession" Grid.Column="2" Content="Simpan &amp; Cek" Width="100" Height="36" Style="{StaticResource IndigoButton}" Margin="6,0,0,0" Click="OnSavePixivSessionClick" />
-                                            <Button x:Name="BtnLoginBrowserPixiv" Grid.Column="3" Content="Login Browser" Width="110" Height="36" Style="{StaticResource EmeraldButton}" Margin="6,0,0,0" Click="OnLoginBrowserPixivClick" />
-                                            <Button x:Name="BtnClearPixivSession" Grid.Column="4" Content="Hapus" Width="60" Height="36" Style="{StaticResource RoseButton}" Margin="6,0,0,0" Click="OnClearPixivSessionClick" />
+                                            <Button x:Name="BtnTogglePixivMask" Grid.Column="1" Content="Lihat" Width="58" Height="36" Style="{StaticResource GhostButton}" Margin="6,0,0,0" Click="OnTogglePixivMaskClick" />
+                                            <Button x:Name="BtnSavePixivSession" Grid.Column="2" Content="Simpan &amp; Cek" Width="120" Height="36" Style="{StaticResource IndigoButton}" Margin="6,0,0,0" Click="OnSavePixivSessionClick" />
+                                            <Button x:Name="BtnLoginBrowserPixiv" Grid.Column="3" Content="Login Browser" Width="125" Height="36" Style="{StaticResource EmeraldButton}" Margin="6,0,0,0" Click="OnLoginBrowserPixivClick" />
+                                            <Button x:Name="BtnClearPixivSession" Grid.Column="4" Content="Hapus" Width="62" Height="36" Style="{StaticResource RoseButton}" Margin="6,0,0,0" Click="OnClearPixivSessionClick" />
                                         </Grid>
                                         <TextBlock x:Name="TxtPixivStatus" Text="Status: Belum Terhubung (Sesi Kosong)" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource BrushTextDim}" Margin="0,2,0,4" />
                                         <TextBlock Text="Diperlukan untuk membuka karya R-18, R-18G, atau members-only. Anda dapat mengklik tombol 'Login Browser' untuk masuk secara langsung via browser Mavdown, atau menempelkan nilai PHPSESSID secara manual. Sesi disimpan secara lokal tanpa menyimpan email atau kata sandi." FontSize="10" Foreground="{DynamicResource BrushTextDim}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Section 5B: Akun & Sesi Bilibili -->
+                                <Border Background="{DynamicResource BrushCardInner}" CornerRadius="10" Padding="14,12" Margin="0,0,0,10">
+                                    <StackPanel>
+                                        <TextBlock Text="SESI AKUN BILIBILI (KUALITAS 1080P FHD / 60FPS / 4K)" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource BrushTextDim}" Margin="0,0,0,6" />
+                                        <Grid Margin="0,0,0,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox x:Name="SettingsBilibiliBox" Background="{DynamicResource BrushGatefoldSegmentBg}" BorderBrush="{DynamicResource BrushBorderDark}" Foreground="{DynamicResource BrushTextBody}" FontSize="11" Height="36" Padding="10,8" />
+                                            <Button x:Name="BtnToggleBilibiliMask" Grid.Column="1" Content="Lihat" Width="58" Height="36" Style="{StaticResource GhostButton}" Margin="6,0,0,0" Click="OnToggleBilibiliMaskClick" />
+                                            <Button x:Name="BtnSaveBilibiliSession" Grid.Column="2" Content="Simpan &amp; Cek" Width="120" Height="36" Style="{StaticResource IndigoButton}" Margin="6,0,0,0" Click="OnSaveBilibiliSessionClick" />
+                                            <Button x:Name="BtnLoginBrowserBilibili" Grid.Column="3" Content="Login Browser" Width="125" Height="36" Style="{StaticResource EmeraldButton}" Margin="6,0,0,0" Click="OnLoginBrowserBilibiliClick" />
+                                            <Button x:Name="BtnClearBilibiliSession" Grid.Column="4" Content="Hapus" Width="62" Height="36" Style="{StaticResource RoseButton}" Margin="6,0,0,0" Click="OnClearBilibiliSessionClick" />
+                                        </Grid>
+                                        <TextBlock x:Name="TxtBilibiliStatus" Text="Status: Belum Terhubung (Sesi Kosong)" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource BrushTextDim}" Margin="0,2,0,4" />
+                                        <TextBlock Text="Membuka akses unduhan stream 1080p FHD (Quality 80), 60fps, dan 4K tanpa watermark. Klik 'Login Browser' untuk masuk secara langsung (bisa scan QR via aplikasi Bilibili ponsel), atau tempel nilai cookie SESSDATA secara manual. Sesi disimpan secara lokal di perangkat Anda." FontSize="10" Foreground="{DynamicResource BrushTextDim}" TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Border>
 
@@ -1071,16 +1160,29 @@
                 <Grid>
                     <Rectangle IsHitTestVisible="False" Fill="{DynamicResource BrushNoiseOverlay}" Margin="-18,-12" />
                     <StackPanel>
-                        <Grid Margin="0,0,0,8">
+                        <!-- Telemetry Header Row -->
+                        <Grid Margin="0,0,0,9">
+                            <!-- Left: Status Indicator Dot, Phase Label, and Percentage Badge -->
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <Border Width="6" Height="6" CornerRadius="3" Background="#10B981" Margin="0,0,8,0" VerticalAlignment="Center" />
-                                <TextBlock x:Name="ProgressStatusText" Text="Status: Siap Mengunduh" FontSize="12" FontWeight="Bold" Foreground="#F3F4F6" VerticalAlignment="Center" />
+                                <Border x:Name="ProgressStatusDot" Width="8" Height="8" CornerRadius="4" Background="#10B981" Margin="0,0,8,0" VerticalAlignment="Center">
+                                    <Border.Effect>
+                                        <DropShadowEffect x:Name="StatusDotGlow" BlurRadius="6" Color="#10B981" ShadowDepth="0" Opacity="0.8" />
+                                    </Border.Effect>
+                                </Border>
+                                <TextBlock x:Name="ProgressStatusText" Text="Status: Siap Mengunduh" FontSize="12" FontWeight="SemiBold" Foreground="#F3F4F6" VerticalAlignment="Center" />
+
+                                <!-- Percentage Chip Badge -->
+                                <Border x:Name="ProgressPercentBadge" Background="#111C2E" BorderBrush="#1E3A5F" BorderThickness="1" CornerRadius="5" Padding="6,2" Margin="10,0,0,0" VerticalAlignment="Center" Visibility="Collapsed">
+                                    <TextBlock x:Name="ProgressPercentText" Text="0.0%" FontSize="10" FontWeight="Bold" FontFamily="Consolas, Segoe UI Variable, sans-serif" Foreground="#38BDF8" VerticalAlignment="Center" />
+                                </Border>
                             </StackPanel>
-                            <TextBlock x:Name="ProgressStatsText" Text="" FontFamily="Consolas, monospace" FontSize="11" Foreground="{DynamicResource BrushAccentIndigo}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+
+                            <!-- Right: Speed, Size, and ETA Telemetry -->
+                            <TextBlock x:Name="ProgressStatsText" Text="" FontFamily="Consolas, Segoe UI Variable, monospace" FontSize="11" FontWeight="SemiBold" Foreground="#818CF8" HorizontalAlignment="Right" VerticalAlignment="Center" />
                         </Grid>
-                        <Border CornerRadius="4" Height="6" Background="{DynamicResource BrushGatefoldSegmentBg}" BorderBrush="{DynamicResource BrushBorderDark}" BorderThickness="1" ClipToBounds="True">
-                            <ProgressBar x:Name="DownloadProgressBar" Height="6" Value="0" Maximum="100" Background="Transparent" Foreground="{DynamicResource BrushAccentEmerald}" BorderThickness="0" />
-                        </Border>
+
+                        <!-- Modern Luxury Progress Bar -->
+                        <ProgressBar x:Name="DownloadProgressBar" Height="8" Value="0" Maximum="100" />
                     </StackPanel>
                 </Grid>
             </Border>

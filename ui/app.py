@@ -15,7 +15,8 @@ from config import (
     load_ytdlp_channel, save_ytdlp_channel, load_proxy, save_proxy,
     load_clipboard_monitor, save_clipboard_monitor,
     load_organize_by_platform, save_organize_by_platform,
-    load_pixiv_session, save_pixiv_session
+    load_pixiv_session, save_pixiv_session,
+    load_bilibili_session, save_bilibili_session
 )
 from downloader import (
     ui_queue, get_video_info, download_video_logic,
@@ -71,6 +72,7 @@ class App(ctk.CTk):
         self.clipboard_monitor_var = ctk.BooleanVar(value=load_clipboard_monitor())
         self.organize_by_platform_var = ctk.BooleanVar(value=load_organize_by_platform())
         self.pixiv_session_var = ctk.StringVar(value=load_pixiv_session())
+        self.bilibili_session_var = ctk.StringVar(value=load_bilibili_session())
         self.ugoira_format_var = ctk.StringVar(value="mp4")
         self.batch_ugoira_format_var = ctk.StringVar(value="gif")
 

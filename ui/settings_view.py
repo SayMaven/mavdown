@@ -7,9 +7,11 @@ from config import (
     is_aria2_available, save_ytdlp_channel, load_ytdlp_channel,
     save_proxy, load_proxy, save_clipboard_monitor, load_clipboard_monitor,
     save_organize_by_platform, load_organize_by_platform,
-    save_pixiv_session, load_pixiv_session
+    save_pixiv_session, load_pixiv_session, load_pixiv_account_name, save_pixiv_account_name,
+    save_bilibili_session, load_bilibili_session, load_bilibili_account_name, save_bilibili_account_name
 )
 from engines.pixiv import verify_pixiv_session, login_pixiv_via_browser
+from engines.bilibili import verify_bilibili_session, login_bilibili_via_browser
 from downloader import get_local_ytdlp_version
 from ui.widgets import ThemedDropdown
 from ui.constants import APP_VERSION, THEME
@@ -255,7 +257,11 @@ def build_settings_view(app, parent):
         command=lambda: _on_clear_pixiv_session(app)
     ).pack(side="left")
 
-    init_status = "Status: Sesi Tersimpan" if app.pixiv_session_var.get() else "Status: Belum Terhubung (Sesi Kosong)"
+    cached_pix_acc = load_pixiv_account_name()
+    if cached_pix_acc:
+        init_status = f"Status: Terhubung ({cached_pix_acc})"
+    else:
+        init_status = "Status: Sesi Tersimpan" if app.pixiv_session_var.get() else "Status: Belum Terhubung (Sesi Kosong)"
     init_color = THEME["accent_emerald"] if app.pixiv_session_var.get() else THEME["text_dim"]
     app.pixiv_status_label = ctk.CTkLabel(
         s_pix_in,
@@ -269,6 +275,87 @@ def build_settings_view(app, parent):
     ctk.CTkLabel(
         s_pix_in,
         text="Diperlukan untuk membuka karya R-18, R-18G, atau members-only. Anda dapat mengklik tombol 'Login Browser' untuk masuk secara langsung via browser Mavdown, atau menempelkan nilai PHPSESSID secara manual. Sesi disimpan secara lokal tanpa menyimpan email atau kata sandi.",
+        font=ctk.CTkFont(size=10), text_color=THEME["text_dim"], wraplength=600, justify="left"
+    ).pack(anchor="w", pady=(0, 0))
+
+    # ══ SECTION 2E: SESI AKUN BILIBILI (1080P FHD / 4K) ══════════════
+    app.sec_bilibili = ctk.CTkFrame(sv_scroll, fg_color=THEME["card_inner"], corner_radius=10)
+    app.sec_bilibili.pack(fill="x", pady=(0, 10))
+    s_bili_in = ctk.CTkFrame(app.sec_bilibili, fg_color="transparent")
+    s_bili_in.pack(fill="x", padx=14, pady=12)
+
+    ctk.CTkLabel(
+        s_bili_in, text="SESI AKUN BILIBILI (KUALITAS 1080P FHD / 60FPS / 4K)",
+        font=ctk.CTkFont(size=10, weight="bold"), text_color=THEME["text_dim"]
+    ).pack(anchor="w", pady=(0, 6))
+
+    bili_row = ctk.CTkFrame(s_bili_in, fg_color="transparent")
+    bili_row.pack(fill="x", pady=(0, 6))
+
+    app.settings_bilibili_entry = ctk.CTkEntry(
+        bili_row, textvariable=app.bilibili_session_var, placeholder_text="Tempel nilai cookie SESSDATA Bilibili di sini...",
+        height=36, corner_radius=8, show="*",
+        border_color=THEME["border_light"], fg_color="#0A0B12", text_color=THEME["text_body"],
+        font=ctk.CTkFont(size=11)
+    )
+    app.settings_bilibili_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+    def _toggle_bilibili_mask():
+        if app.settings_bilibili_entry.cget("show") == "*":
+            app.settings_bilibili_entry.configure(show="")
+            bili_show_btn.configure(text="Sembunyikan")
+        else:
+            app.settings_bilibili_entry.configure(show="*")
+            bili_show_btn.configure(text="Lihat")
+
+    bili_show_btn = ctk.CTkButton(
+        bili_row, text="Lihat", width=64, height=36, corner_radius=8,
+        fg_color="#1E2032", hover_color="#2B2E45", font=ctk.CTkFont(size=11),
+        command=_toggle_bilibili_mask
+    )
+    bili_show_btn.pack(side="left", padx=(0, 6))
+
+    app.bilibili_save_btn = ctk.CTkButton(
+        bili_row, text="Simpan & Cek", width=100, height=36, corner_radius=8,
+        fg_color=THEME["accent_indigo"], hover_color=THEME["accent_indigo_hover"],
+        font=ctk.CTkFont(size=11, weight="bold"),
+        command=lambda: _on_save_bilibili_session(app)
+    )
+    app.bilibili_save_btn.pack(side="left", padx=(0, 6))
+
+    app.bilibili_login_btn = ctk.CTkButton(
+        bili_row, text="Login Browser", width=110, height=36, corner_radius=8,
+        fg_color=THEME["accent_emerald"], hover_color=THEME["accent_emerald_hover"],
+        font=ctk.CTkFont(size=11, weight="bold"),
+        command=lambda: _on_browser_login_bilibili(app)
+    )
+    app.bilibili_login_btn.pack(side="left", padx=(0, 6))
+
+    ctk.CTkButton(
+        bili_row, text="Hapus", width=60, height=36, corner_radius=8,
+        fg_color="#27131B", hover_color="#451824", text_color="#F87171",
+        font=ctk.CTkFont(size=11, weight="bold"),
+        command=lambda: _on_clear_bilibili_session(app)
+    ).pack(side="left")
+
+    cached_bili_acc = load_bilibili_account_name()
+    if cached_bili_acc:
+        init_bili_status = f"Status: Terhubung ({cached_bili_acc})"
+    else:
+        init_bili_status = "Status: Sesi Tersimpan" if app.bilibili_session_var.get() else "Status: Belum Terhubung (Sesi Kosong)"
+    init_bili_color = THEME["accent_emerald"] if app.bilibili_session_var.get() else THEME["text_dim"]
+    app.bilibili_status_label = ctk.CTkLabel(
+        s_bili_in,
+        text=init_bili_status,
+        font=ctk.CTkFont(size=10, weight="bold"),
+        text_color=init_bili_color,
+        anchor="w", justify="left"
+    )
+    app.bilibili_status_label.pack(anchor="w", pady=(2, 4))
+
+    ctk.CTkLabel(
+        s_bili_in,
+        text="Membuka akses unduhan stream 1080p FHD (Quality 80), 60fps, dan 4K tanpa watermark. Klik 'Login Browser' untuk masuk secara langsung (bisa scan QR via aplikasi Bilibili ponsel), atau tempel nilai cookie SESSDATA secara manual. Sesi disimpan secara lokal di perangkat Anda.",
         font=ctk.CTkFont(size=10), text_color=THEME["text_dim"], wraplength=600, justify="left"
     ).pack(anchor="w", pady=(0, 0))
 
@@ -533,6 +620,7 @@ def _on_save_pixiv_session(app):
             app.pixiv_save_btn.configure(state="normal", text="Simpan & Cek")
             if is_valid:
                 save_pixiv_session(session_val)
+                save_pixiv_account_name(user_info)
                 app.pixiv_status_label.configure(
                     text=f"Status: Terhubung ({user_info})",
                     text_color=THEME["accent_emerald"]
@@ -598,6 +686,90 @@ def _on_clear_pixiv_session(app):
         text_color=THEME["text_dim"]
     )
     app.show_toast("Sesi Pixiv berhasil dihapus.", "info")
+
+
+def _on_save_bilibili_session(app):
+    """Handler simpan dan verifikasi sesi Bilibili."""
+    session_val = app.bilibili_session_var.get().strip()
+    if not session_val:
+        app.show_toast("Sesi Bilibili tidak boleh kosong.", "warning")
+        return
+
+    app.bilibili_save_btn.configure(state="disabled", text="Memeriksa...")
+    app.bilibili_status_label.configure(text="Status: Memverifikasi sesi...", text_color=THEME["text_muted"])
+
+    def _verify_thread():
+        is_valid, user_info = verify_bilibili_session(session_val)
+        def _update_ui():
+            app.bilibili_save_btn.configure(state="normal", text="Simpan & Cek")
+            if is_valid:
+                save_bilibili_session(session_val)
+                save_bilibili_account_name(user_info)
+                app.bilibili_status_label.configure(
+                    text=f"Status: Terhubung ({user_info})",
+                    text_color=THEME["accent_emerald"]
+                )
+                app.show_toast(f"Sesi Bilibili berhasil terhubung: {user_info}", "success")
+            else:
+                app.bilibili_status_label.configure(
+                    text=f"Status: {user_info}",
+                    text_color="#EF4444"
+                )
+                app.show_toast("Sesi Bilibili tidak valid atau kadaluarsa.", "error")
+
+        app.after(0, _update_ui)
+
+    import threading
+    threading.Thread(target=_verify_thread, daemon=True).start()
+
+
+def _on_browser_login_bilibili(app):
+    """Handler login Bilibili interaktif via browser isolated Mavdown."""
+    import threading
+
+    app.bilibili_login_btn.configure(state="disabled", text="Membuka Browser...")
+    app.bilibili_status_label.configure(
+        text="Status: Membuka jendela login browser...",
+        text_color=THEME["text_muted"]
+    )
+
+    def _status_update(msg: str):
+        def _update():
+            app.bilibili_status_label.configure(text=f"Status: {msg}", text_color=THEME["text_muted"])
+            if "login" in msg.lower() and "terdeteksi" not in msg.lower():
+                app.bilibili_login_btn.configure(text="Menunggu Login...")
+        app.after(0, _update)
+
+    def _worker():
+        ok, result = login_bilibili_via_browser(status_callback=_status_update)
+
+        def _on_finish():
+            app.bilibili_login_btn.configure(state="normal", text="Login Browser")
+            if ok:
+                app.bilibili_session_var.set(result)
+                app.show_toast("Login berhasil! Memverifikasi sesi Bilibili...", "info")
+                _on_save_bilibili_session(app)
+            else:
+                app.bilibili_status_label.configure(
+                    text=f"Status: {result}",
+                    text_color="#EF4444"
+                )
+                app.show_toast(result, "warning")
+
+        app.after(0, _on_finish)
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def _on_clear_bilibili_session(app):
+    """Handler hapus sesi Bilibili tersimpan."""
+    app.bilibili_session_var.set("")
+    save_bilibili_session("")
+    app.bilibili_status_label.configure(
+        text="Status: Belum Terhubung (Sesi Kosong)",
+        text_color=THEME["text_dim"]
+    )
+    app.show_toast("Sesi Bilibili berhasil dihapus.", "info")
 
 
 def _reset_prefs(app):

@@ -177,13 +177,52 @@ def load_organize_by_platform() -> bool:
 def save_pixiv_session(session: str):
     """Simpan cookie sesi PHPSESSID Pixiv ke config file."""
     data = _read_raw_config()
-    data["pixiv_session"] = session.strip() if session else ""
+    clean = session.strip() if session else ""
+    data["pixiv_session"] = clean
+    if not clean:
+        data["pixiv_account_name"] = ""
     _write_raw_config(data)
 
 def load_pixiv_session() -> str:
     """Muat cookie sesi PHPSESSID Pixiv tersimpan."""
     data = _read_raw_config()
     return data.get("pixiv_session", "")
+
+def save_pixiv_account_name(name: str):
+    """Simpan label/nama akun Pixiv yang telah terverifikasi."""
+    data = _read_raw_config()
+    data["pixiv_account_name"] = name.strip() if name else ""
+    _write_raw_config(data)
+
+def load_pixiv_account_name() -> str:
+    """Muat nama akun Pixiv terverifikasi tersimpan."""
+    data = _read_raw_config()
+    return data.get("pixiv_account_name", "")
+
+def save_bilibili_session(session: str):
+    """Simpan cookie sesi SESSDATA Bilibili ke config file."""
+    data = _read_raw_config()
+    clean = session.strip() if session else ""
+    data["bilibili_session"] = clean
+    if not clean:
+        data["bilibili_account_name"] = ""
+    _write_raw_config(data)
+
+def load_bilibili_session() -> str:
+    """Muat cookie sesi SESSDATA Bilibili tersimpan."""
+    data = _read_raw_config()
+    return data.get("bilibili_session", "")
+
+def save_bilibili_account_name(name: str):
+    """Simpan label/nama akun Bilibili yang telah terverifikasi."""
+    data = _read_raw_config()
+    data["bilibili_account_name"] = name.strip() if name else ""
+    _write_raw_config(data)
+
+def load_bilibili_account_name() -> str:
+    """Muat nama akun Bilibili terverifikasi tersimpan."""
+    data = _read_raw_config()
+    return data.get("bilibili_account_name", "")
 
 def load_config() -> str:
     """Kembalikan path output yang tersimpan (backward-compatible)."""

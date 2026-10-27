@@ -8,6 +8,7 @@ from engines.instagram import get_instagram_info, download_instagram
 from engines.facebook import get_facebook_info, download_facebook
 from engines.bilibili import get_bilibili_info, download_bilibili
 from engines.pixiv import get_pixiv_info, download_pixiv
+from engines.generic import is_generic_direct_media_url, get_generic_info, download_generic
 
 SERVICE_FOLDER_MAP = {
     'youtube': 'Mavdown_YouTube',
@@ -126,6 +127,8 @@ def resolve_fast_info(url: str, share_text: str = None) -> dict:
             return get_bilibili_info(url)
         elif platform == 'pixiv':
             return get_pixiv_info(url)
+        elif platform == 'generic' and is_generic_direct_media_url(url):
+            return get_generic_info(url)
     except Exception:
         pass
     return None
@@ -136,9 +139,12 @@ def dispatch_fast_download(url: str, output_dir: str, ui_queue=None, options=Non
     Mengembalikan True jika sukses, False jika gagal atau harus beralih ke Tier 2 (yt-dlp).
     """
     platform = detect_platform(url)
-    tier1_supported = ('tiktok', 'douyin', 'twitter', 'pinterest', 'instagram', 'facebook', 'bilibili', 'pixiv')
+    tier1_supported = ('tiktok', 'douyin', 'twitter', 'pinterest', 'instagram', 'facebook', 'bilibili', 'pixiv', 'generic')
     if platform not in tier1_supported:
         # Bukan platform Tier 1, langsung serahkan ke yt-dlp
+        return False
+
+    if platform == 'generic' and not is_generic_direct_media_url(url):
         return False
 
     if options is None:
@@ -161,6 +167,8 @@ def dispatch_fast_download(url: str, output_dir: str, ui_queue=None, options=Non
             return download_bilibili(url, output_dir, ui_queue, options, abort_checker)
         elif platform == 'pixiv':
             return download_pixiv(url, output_dir, ui_queue, options, abort_checker)
+        elif platform == 'generic':
+            return download_generic(url, output_dir, ui_queue, options, abort_checker)
     except Exception as e:
         if ui_queue:
             ui_queue.put({"type": "log", "text": f"[TIER 1 EXCEPTION] {e}\n"})

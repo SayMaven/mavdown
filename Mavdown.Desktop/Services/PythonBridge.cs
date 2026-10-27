@@ -17,7 +17,7 @@ namespace Mavdown.Desktop.Services
         private bool _isDisposed;
 
         public event Action<string>? OnLog;
-        public event Action<double, string, string, string>? OnProgress; // value, text, speed, eta
+        public event Action<double, string, string, string, string, string>? OnProgress; // value, text, speed, eta, size_dl, size_total
         public event Action<JsonObject>? OnInfoData;
         public event Action<string, string>? OnThumbReady; // path, base64
         public event Action? OnDownloadFinish;
@@ -31,6 +31,9 @@ namespace Mavdown.Desktop.Services
         public event Action<string>? OnPixivLoginStatus;
         public event Action<bool, string?, string?>? OnPixivLoginComplete;
         public event Action<bool, string>? OnPixivVerifyResult;
+        public event Action<string>? OnBilibiliLoginStatus;
+        public event Action<bool, string?, string?>? OnBilibiliLoginComplete;
+        public event Action<bool, string>? OnBilibiliVerifyResult;
 
         public bool IsReady { get; private set; }
 
@@ -151,7 +154,9 @@ namespace Mavdown.Desktop.Services
                             string text = doc["text"]?.ToString() ?? "";
                             string speed = doc["speed"]?.ToString() ?? "";
                             string eta = doc["eta"]?.ToString() ?? "";
-                            OnProgress?.Invoke(val, text, speed, eta);
+                            string sizeDl = doc["size_dl"]?.ToString() ?? "";
+                            string sizeTotal = doc["size_total"]?.ToString() ?? "";
+                            OnProgress?.Invoke(val, text, speed, eta, sizeDl, sizeTotal);
                             break;
 
                         case "info_data":
@@ -210,6 +215,23 @@ namespace Mavdown.Desktop.Services
                             bool verifyValid = doc["valid"]?.GetValue<bool>() ?? false;
                             string verifyMsg = doc["message"]?.ToString() ?? "";
                             OnPixivVerifyResult?.Invoke(verifyValid, verifyMsg);
+                            break;
+
+                        case "bilibili_login_status":
+                            OnBilibiliLoginStatus?.Invoke(doc["status"]?.ToString() ?? "");
+                            break;
+
+                        case "bilibili_login_complete":
+                            bool biliLoginOk = doc["success"]?.GetValue<bool>() ?? false;
+                            string? biliErrOrSession = biliLoginOk ? doc["session"]?.ToString() : doc["error"]?.ToString();
+                            string? biliUserName = doc["user_name"]?.ToString();
+                            OnBilibiliLoginComplete?.Invoke(biliLoginOk, biliErrOrSession, biliUserName);
+                            break;
+
+                        case "bilibili_verify_result":
+                            bool biliVerifyValid = doc["valid"]?.GetValue<bool>() ?? false;
+                            string biliVerifyMsg = doc["message"]?.ToString() ?? "";
+                            OnBilibiliVerifyResult?.Invoke(biliVerifyValid, biliVerifyMsg);
                             break;
                     }
                 });
@@ -311,6 +333,16 @@ namespace Mavdown.Desktop.Services
         public async Task VerifyPixivSessionAsync(string session = "")
         {
             await SendCommandAsync(new { action = "verify_pixiv_session", session = session, id = Guid.NewGuid().ToString("N")[..8] });
+        }
+
+        public async Task BilibiliLoginBrowserAsync()
+        {
+            await SendCommandAsync(new { action = "bilibili_login_browser", id = Guid.NewGuid().ToString("N")[..8] });
+        }
+
+        public async Task VerifyBilibiliSessionAsync(string session = "")
+        {
+            await SendCommandAsync(new { action = "verify_bilibili_session", session = session, id = Guid.NewGuid().ToString("N")[..8] });
         }
 
         public void Dispose()

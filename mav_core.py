@@ -24,7 +24,8 @@ from config import (
     DEFAULT_OUTPUT_DIR, load_config, load_browser_cookie,
     load_proxy, save_proxy, load_organize_by_platform, save_organize_by_platform,
     load_clipboard_monitor, save_clipboard_monitor,
-    load_pixiv_session, save_pixiv_session,
+    load_pixiv_session, save_pixiv_session, load_pixiv_account_name, save_pixiv_account_name,
+    load_bilibili_session, save_bilibili_session, load_bilibili_account_name, save_bilibili_account_name,
     load_ytdlp_channel, save_ytdlp_channel, is_aria2_available,
     save_config, _read_raw_config,
     YT_DLP_PATH, ARIA2_PATH, FFMPEG_PATH, FFPROBE_PATH, NODE_PATH
@@ -242,6 +243,11 @@ def _pump_ui_queue():
                 except Exception:
                     pass
 
+            if thumb_path and _latest_inspected_meta:
+                if not _latest_inspected_meta.get("thumbnail"):
+                    _latest_inspected_meta["thumbnail"] = thumb_path
+                _latest_inspected_meta["local_thumbnail"] = thumb_path
+
             emit_json({
                 "event": "info_thumb",
                 "status": "ready",
@@ -313,18 +319,30 @@ def _record_download_history():
     is_slide = meta.get("is_slide", False)
     media_fmt = "SLIDE" if (is_slide or os.path.isdir(newest_path)) else os.path.splitext(newest_path)[1].lstrip('.').upper()
 
+    dur_str = meta.get("duration_string") or ""
+    if not dur_str and meta.get("duration"):
+        try:
+            d_val = float(meta["duration"])
+            m, s = divmod(int(d_val), 60)
+            h_val, m = divmod(m, 60)
+            dur_str = f"{h_val}:{m:02d}:{s:02d}" if h_val else f"{m:02d}:{s:02d}"
+        except Exception:
+            dur_str = str(meta.get("duration"))
+
     add_history_entry(
         title=meta.get("title", os.path.basename(newest_path)),
         platform=platform,
         file_path=newest_path,
         thumbnail=meta.get("thumbnail", ""),
         is_slide=is_slide,
-        duration=str(meta.get("duration", "")),
+        duration=dur_str,
         source_url=url,
         author=meta.get("uploader", ""),
         resolution=meta.get("resolution_label", ""),
         media_format=media_fmt,
-        slide_count=meta.get("slide_count", 0)
+        slide_count=meta.get("slide_count", 0),
+        codec=str(meta.get("codec") or meta.get("vcodec") or ""),
+        fps=f"{meta['fps']} FPS" if meta.get("fps") else ""
     )
 
 def handle_inspect(req: dict):
@@ -459,6 +477,10 @@ def handle_get_config(req: dict):
         "organize_by_platform": load_organize_by_platform(),
         "pixiv_session": load_pixiv_session(),
         "has_pixiv_session": bool(load_pixiv_session()),
+        "pixiv_account_name": load_pixiv_account_name(),
+        "bilibili_session": load_bilibili_session(),
+        "has_bilibili_session": bool(load_bilibili_session()),
+        "bilibili_account_name": load_bilibili_account_name(),
         "ytdlp_channel": load_ytdlp_channel(),
         "ytdlp_version": get_cached_ytdlp_version(),
         "is_aria2_available": get_cached_aria2_available(),
@@ -488,6 +510,8 @@ def handle_set_config(req: dict):
         save_ytdlp_channel(str(val))
     elif key == "pixiv_session":
         save_pixiv_session(str(val))
+    elif key == "bilibili_session":
+        save_bilibili_session(str(val))
     elif key:
         # Generic config save
         raw = _read_raw_config()
@@ -526,7 +550,9 @@ def handle_pixiv_login_browser(req: dict):
             if ok:
                 save_pixiv_session(res)
                 v_ok, v_res = verify_pixiv_session(res)
-                user_name = v_res.get('name', 'User') if (v_ok and isinstance(v_res, dict)) else ''
+                user_name = v_res if v_ok else ''
+                if v_ok:
+                    save_pixiv_account_name(v_res)
                 emit_json({
                     "event": "pixiv_login_complete",
                     "id": req_id,
@@ -561,18 +587,90 @@ def handle_verify_pixiv_session(req: dict):
     def _worker():
         try:
             ok, res = verify_pixiv_session(session)
-            user_name = res.get('name', 'User') if (ok and isinstance(res, dict)) else ''
+            if ok:
+                save_pixiv_account_name(res)
             emit_json({
                 "event": "pixiv_verify_result",
                 "id": req_id,
                 "valid": ok,
                 "session": session,
-                "user_name": user_name,
-                "message": f"Terhubung sebagai {user_name}" if user_name else (res if isinstance(res, str) else "Sesi aktif")
+                "user_name": res if ok else '',
+                "message": f"Terhubung sebagai {res}" if ok else res
             })
         except Exception as e:
             emit_json({
                 "event": "pixiv_verify_result",
+                "id": req_id,
+                "valid": False,
+                "session": session,
+                "message": f"Gagal verifikasi: {e}"
+            })
+    threading.Thread(target=_worker, daemon=True).start()
+
+def handle_bilibili_login_browser(req: dict):
+    """Membuka browser login Bilibili secara interaktif untuk menangkap cookie SESSDATA."""
+    from engines.bilibili import login_bilibili_via_browser, verify_bilibili_session
+    req_id = req.get("id", "")
+
+    def _status_cb(msg: str):
+        emit_json({"event": "bilibili_login_status", "id": req_id, "status": msg})
+
+    def _worker():
+        try:
+            ok, res = login_bilibili_via_browser(status_callback=_status_cb)
+            if ok:
+                save_bilibili_session(res)
+                v_ok, v_res = verify_bilibili_session(res)
+                user_name = v_res if v_ok else ''
+                if v_ok:
+                    save_bilibili_account_name(v_res)
+                emit_json({
+                    "event": "bilibili_login_complete",
+                    "id": req_id,
+                    "success": True,
+                    "session": res,
+                    "user_name": user_name
+                })
+            else:
+                emit_json({
+                    "event": "bilibili_login_complete",
+                    "id": req_id,
+                    "success": False,
+                    "error": str(res)
+                })
+        except Exception as e:
+            emit_json({
+                "event": "bilibili_login_complete",
+                "id": req_id,
+                "success": False,
+                "error": str(e)
+            })
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+def handle_verify_bilibili_session(req: dict):
+    """Memverifikasi sesi Bilibili yang diberikan atau tersimpan."""
+    from engines.bilibili import verify_bilibili_session
+    req_id = req.get("id", "")
+    session = req.get("session")
+    if session is None:
+        session = load_bilibili_session()
+    def _worker():
+        try:
+            ok, res = verify_bilibili_session(session)
+            if ok:
+                save_bilibili_account_name(res)
+            emit_json({
+                "event": "bilibili_verify_result",
+                "id": req_id,
+                "valid": ok,
+                "session": session,
+                "user_name": res if ok else '',
+                "message": f"Terhubung sebagai {res}" if ok else res
+            })
+        except Exception as e:
+            emit_json({
+                "event": "bilibili_verify_result",
                 "id": req_id,
                 "valid": False,
                 "session": session,
@@ -634,6 +732,10 @@ def run_daemon():
                 handle_pixiv_login_browser(req)
             elif action == "verify_pixiv_session":
                 handle_verify_pixiv_session(req)
+            elif action == "bilibili_login_browser":
+                handle_bilibili_login_browser(req)
+            elif action == "verify_bilibili_session":
+                handle_verify_bilibili_session(req)
             elif action == "detect_platform":
                 url = req.get("url", "")
                 emit_json({"event": "platform_detected", "id": req.get("id", ""), "platform": detect_platform(url)})
