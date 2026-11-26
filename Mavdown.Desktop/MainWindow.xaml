@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:models="clr-namespace:Mavdown.Desktop.Models"
         mc:Ignorable="d"
-        Title="Maven Downloader v1.3.0" 
+        Title="Maven Downloader v1.3.1" 
         Height="880" Width="1420"
         MinHeight="750" MinWidth="1180"
         WindowStartupLocation="CenterScreen"
@@ -63,7 +63,7 @@
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="MAVDOWN" FontWeight="Bold" FontSize="18" Foreground="{DynamicResource BrushTextTitle}" />
                                 <Border Background="{DynamicResource BrushNavActiveBg}" CornerRadius="6" Padding="6,1" Margin="6,0,0,0" VerticalAlignment="Center">
-                                    <TextBlock Text="v1.3.0" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource BrushNavActiveFg}" />
+                                    <TextBlock Text="v1.3.1" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource BrushNavActiveFg}" />
                                 </Border>
                             </StackPanel>
                             <Border x:Name="EngineStatusBadge" Background="#064E3B" CornerRadius="6" Padding="6,1" Margin="0,3,0,0" HorizontalAlignment="Left">
@@ -887,7 +887,7 @@
                                 <Grid Margin="0,0,0,14">
                                     <TextBlock Text="Pengaturan &amp; Tentang" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource BrushTextTitle}" VerticalAlignment="Center" />
                                     <Border Background="{DynamicResource BrushNavActiveBg}" CornerRadius="6" Padding="8,3" HorizontalAlignment="Right">
-                                        <TextBlock Text="v1.3.0" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource BrushNavActiveFg}" />
+                                        <TextBlock Text="v1.3.1" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource BrushNavActiveFg}" />
                                     </Border>
                                 </Grid>
 
@@ -1092,7 +1092,7 @@
                                             </Border>
                                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                 <TextBlock Text="Maven Downloader (Mavdown)" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource BrushTextTitle}" />
-                                                <TextBlock Text="Versi v1.3.0  --  Multi-Tier Engine Architecture" FontSize="11" Foreground="{DynamicResource BrushTextMuted}" Margin="0,2,0,0" />
+                                                <TextBlock Text="Versi v1.3.1  --  Multi-Tier Engine Architecture" FontSize="11" Foreground="{DynamicResource BrushTextMuted}" Margin="0,2,0,0" />
                                                 <TextBlock Text="Dikembangkan oleh SayMaven" FontSize="11" Foreground="{DynamicResource BrushTextDim}" Margin="0,2,0,0" />
                                             </StackPanel>
                                         </Grid>

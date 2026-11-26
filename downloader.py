@@ -58,7 +58,7 @@ def stop_current_process():
             current_process = None
 
 def create_yt_dlp_command(url, options=[]):
-    command = [YT_DLP_PATH]
+    command = [YT_DLP_PATH, "--encoding", "utf-8"]
     command.extend(options)
     command.append(url)
     return command
