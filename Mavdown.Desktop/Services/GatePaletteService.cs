@@ -394,28 +394,25 @@ namespace Mavdown.Desktop.Services
 
             if (monochrome)
             {
-                // Gatefold pure monochrome / neutral scheme
-                double bgL = isDark ? Math.Clamp(0.155 + dom.L * 0.06, 0.15, 0.215) : Math.Clamp(0.955 + (dom.L - 0.9) * 0.08, 0.93, 0.975);
-                double bgC = isDark ? 0.007 : 0.004;
-                double bgHue = 240.0;
+                // Gatefold pure monochrome / neutral scheme (OKLCH contrast-enforced untuk dark & light)
+                double bgL = isDark ? Math.Clamp(0.145 + dom.L * 0.045, 0.140, 0.190) : Math.Clamp(0.955 + (dom.L - 0.9) * 0.06, 0.935, 0.975);
+                double bgC = isDark ? 0.008 : 0.004;
+                double bgHue = 250.0;
                 var bgCol = LchToColor(bgL, bgC, bgHue);
 
                 double surfL = bgL + sign * 0.038;
-                double surf2L = bgL + sign * 0.075;
+                double surf2L = bgL + sign * 0.070;
                 var surfCol = LchToColor(surfL, bgC * 1.05, bgHue);
                 var surf2Col = LchToColor(surf2L, bgC * 1.15, bgHue);
 
-                // Pure silver grey accent (Gatefold #B8BEC5)
-                var accCol = LchToColor(0.78, 0.012, 240);
-                var accInkCol = Color.FromRgb(0x11, 0x13, 0x17);
-                var acc2Col = LchToColor(0.75, 0.022, 265); // #BCBAD7
+                var mTextEnf = EnforceContrast(isDark ? 0.95 : 0.18, 0.004, bgHue, bgCol, 10.5, sign);
+                var mText2Enf = EnforceContrast(isDark ? 0.82 : 0.36, 0.005, bgHue, bgCol, 6.2, sign);
+                var mText3Enf = EnforceContrast(isDark ? 0.65 : 0.50, 0.006, bgHue, bgCol, 4.2, sign);
 
-                // Slate ambient halo glow (Gatefold #657383)
-                var glowCol = LchToColor(0.48, 0.022, 240);
-
-                var textCol = Color.FromRgb(0xF2, 0xF3, 0xF5);
-                var text2Col = Color.FromRgb(0xBC, 0xBE, 0xBF);
-                var text3Col = Color.FromRgb(0x88, 0x8E, 0x96);
+                var mAccEnf = EnforceContrast(isDark ? 0.78 : 0.46, 0.014, bgHue, bgCol, 4.0, sign);
+                var mAccInkEnf = EnforceContrast(isDark ? 0.86 : 0.38, 0.012, bgHue, bgCol, 5.2, sign);
+                var mAcc2Enf = EnforceContrast(isDark ? 0.74 : 0.52, 0.022, 265.0, bgCol, 3.2, sign);
+                var glowCol = LchToColor(isDark ? 0.50 : 0.60, 0.020, bgHue);
 
                 var monoResult = new PaletteResult
                 {
@@ -423,13 +420,13 @@ namespace Mavdown.Desktop.Services
                     Background = new PaletteColor(bgL, bgC, bgHue, bgCol),
                     Surface = new PaletteColor(surfL, bgC * 1.05, bgHue, surfCol),
                     Surface2 = new PaletteColor(surf2L, bgC * 1.15, bgHue, surf2Col),
-                    Accent = new PaletteColor(0.78, 0.012, 240, accCol),
-                    AccentInk = new PaletteColor(0.12, 0.005, 240, accInkCol),
-                    Accent2 = new PaletteColor(0.75, 0.022, 265, acc2Col),
-                    Glow = new PaletteColor(0.48, 0.022, 240, glowCol),
-                    Text = new PaletteColor(0.97, 0.005, 240, textCol),
-                    Text2 = new PaletteColor(0.80, 0.005, 240, text2Col),
-                    Text3 = new PaletteColor(0.62, 0.005, 240, text3Col)
+                    Accent = new PaletteColor(mAccEnf.L, mAccEnf.C, mAccEnf.h, mAccEnf.rgb),
+                    AccentInk = new PaletteColor(mAccInkEnf.L, mAccInkEnf.C, mAccInkEnf.h, mAccInkEnf.rgb),
+                    Accent2 = new PaletteColor(mAcc2Enf.L, mAcc2Enf.C, mAcc2Enf.h, mAcc2Enf.rgb),
+                    Glow = new PaletteColor(isDark ? 0.50 : 0.60, 0.020, bgHue, glowCol),
+                    Text = new PaletteColor(mTextEnf.L, mTextEnf.C, mTextEnf.h, mTextEnf.rgb),
+                    Text2 = new PaletteColor(mText2Enf.L, mText2Enf.C, mText2Enf.h, mText2Enf.rgb),
+                    Text3 = new PaletteColor(mText3Enf.L, mText3Enf.C, mText3Enf.h, mText3Enf.rgb)
                 };
 
                 foreach (var c in clusters.Take(8))
@@ -440,37 +437,37 @@ namespace Mavdown.Desktop.Services
                 return monoResult;
             }
 
-            // Chromatic Palette (Cover Berwarna)
+            // Chromatic Palette (Cover Berwarna - Constant Hue Ramp tanpa Hue Drift)
             var acc = ranked[0].c;
             var acc2Src = ranked.FirstOrDefault(x => HueDist(x.c.H, acc.H) > 28);
             var acc2 = acc2Src != null ? acc2Src.c : new Cluster { L = acc.L, C = acc.C * 0.85, H = (acc.H + 38) % 360 };
 
             double chrBgHue = dom.C > 0.025 ? dom.H : (colorfulness > 0.02 ? massHue : acc.H);
-            double bgChromaSrc = Math.Max(dom.C, colorfulness * 0.8);
+            double bgChromaSrc = Math.Max(dom.C, colorfulness * 0.72);
 
-            double chrBgL = isDark ? Math.Clamp(0.155 + dom.L * 0.06, 0.15, 0.215) : Math.Clamp(0.955 + (dom.L - 0.9) * 0.08, 0.93, 0.975);
-            double chrBgC = isDark ? Math.Clamp(bgChromaSrc * 0.42, 0.008, 0.052) : Math.Clamp(bgChromaSrc * 0.22, 0.004, 0.03);
+            double chrBgL = isDark ? Math.Clamp(0.145 + dom.L * 0.045, 0.140, 0.190) : Math.Clamp(0.955 + (dom.L - 0.9) * 0.06, 0.935, 0.975);
+            double chrBgC = isDark ? Math.Clamp(bgChromaSrc * 0.30, 0.008, 0.032) : Math.Clamp(bgChromaSrc * 0.18, 0.004, 0.022);
 
             var chrBgCol = LchToColor(chrBgL, chrBgC, chrBgHue);
 
-            double chrSurfL = chrBgL + sign * 0.038;
-            double chrSurf2L = chrBgL + sign * 0.075;
-            var chrSurfCol = LchToColor(chrSurfL, chrBgC * 1.1, chrBgHue);
-            var chrSurf2Col = LchToColor(chrSurf2L, chrBgC * 1.2, chrBgHue);
+            double chrSurfL = chrBgL + sign * 0.040;
+            double chrSurf2L = chrBgL + sign * 0.072;
+            var chrSurfCol = LchToColor(chrSurfL, chrBgC * 1.06, chrBgHue);
+            var chrSurf2Col = LchToColor(chrSurf2L, chrBgC * 1.12, chrBgHue);
 
-            double tC = Math.Min(0.018, chrBgC * 0.5);
-            double textL = isDark ? 0.97 : 0.18;
-            double text2L = isDark ? 0.82 : 0.38;
-            double text3L = isDark ? 0.65 : 0.52;
+            double tC = Math.Min(0.014, chrBgC * 0.45);
+            double textL = isDark ? 0.95 : 0.18;
+            double text2L = isDark ? 0.83 : 0.36;
+            double text3L = isDark ? 0.66 : 0.50;
 
-            var textEnf = EnforceContrast(textL, tC, chrBgHue, chrBgCol, 10.0, sign);
-            var text2Enf = EnforceContrast(text2L, tC, chrBgHue, chrBgCol, 6.0, sign);
-            var text3Enf = EnforceContrast(text3L, tC, chrBgHue, chrBgCol, 4.0, sign);
+            var textEnf = EnforceContrast(textL, tC, chrBgHue, chrBgCol, 10.5, sign);
+            var text2Enf = EnforceContrast(text2L, tC, chrBgHue, chrBgCol, 6.2, sign);
+            var text3Enf = EnforceContrast(text3L, tC, chrBgHue, chrBgCol, 4.2, sign);
 
-            double accL = isDark ? Math.Clamp(acc.L, 0.70, 0.88) : Math.Clamp(acc.L, 0.48, 0.74);
-            var accEnf = EnforceContrast(accL, Math.Clamp(acc.C * 1.1, 0.08, 0.22), acc.H, chrBgCol, isDark ? 3.5 : 2.4, sign);
-            var accInkEnf = EnforceContrast(acc.L, acc.C, acc.H, chrBgCol, 4.6, sign);
-            var acc2Enf = EnforceContrast(isDark ? 0.75 : 0.55, Math.Clamp(acc2.C, 0.06, 0.19), acc2.H, chrBgCol, 2.8, sign);
+            double accL = isDark ? Math.Clamp(acc.L, 0.68, 0.84) : Math.Clamp(acc.L, 0.44, 0.64);
+            var accEnf = EnforceContrast(accL, Math.Clamp(acc.C * 1.05, 0.08, 0.20), acc.H, chrBgCol, isDark ? 3.8 : 3.2, sign);
+            var accInkEnf = EnforceContrast(isDark ? Math.Max(accEnf.L, 0.78) : Math.Min(accEnf.L, 0.42), Math.Clamp(acc.C * 0.90, 0.06, 0.16), acc.H, chrBgCol, 4.8, sign);
+            var acc2Enf = EnforceContrast(isDark ? 0.76 : 0.50, Math.Clamp(acc2.C, 0.06, 0.17), acc2.H, chrBgCol, 3.2, sign);
 
             double glowL = isDark ? 0.52 : 0.62;
             var chrGlowCol = LchToColor(glowL, Math.Clamp(acc.C, 0.05, 0.20), acc.H);
@@ -500,24 +497,36 @@ namespace Mavdown.Desktop.Services
 
         public static PaletteResult GetDefaultMavdownPalette()
         {
+            const double baseH = 262.0;
+            const double accH = 264.0;
+            var bgCol = LchToColor(0.145, 0.016, baseH);
+            var surfCol = LchToColor(0.185, 0.019, baseH);
+            var surf2Col = LchToColor(0.217, 0.022, baseH);
+            var accCol = LchToColor(0.680, 0.165, accH);
+            var accInkCol = LchToColor(0.830, 0.095, accH);
+            var acc2Col = LchToColor(0.760, 0.110, 215.0);
+            var glowCol = LchToColor(0.540, 0.140, accH);
+            var textCol = LchToColor(0.955, 0.008, baseH);
+            var text2Col = LchToColor(0.840, 0.012, baseH);
+            var text3Col = LchToColor(0.670, 0.014, baseH);
+
             return new PaletteResult
             {
                 IsDark = true,
-                Background = new PaletteColor(0.12, 0.02, 260, Color.FromRgb(0x08, 0x0A, 0x10)),
-                Surface = new PaletteColor(0.16, 0.03, 260, Color.FromRgb(0x0E, 0x11, 0x1A)),
-                Surface2 = new PaletteColor(0.20, 0.04, 260, Color.FromRgb(0x14, 0x18, 0x26)),
-                Accent = new PaletteColor(0.74, 0.12, 270, Color.FromRgb(0x63, 0x66, 0xF1)),
-                AccentInk = new PaletteColor(0.82, 0.09, 270, Color.FromRgb(0x93, 0xC5, 0xFD)),
-                Accent2 = new PaletteColor(0.76, 0.09, 205, Color.FromRgb(0x38, 0xBD, 0xF8)),
-                Glow = new PaletteColor(0.56, 0.11, 270, Color.FromRgb(0x63, 0x66, 0xF1)),
-                Text = new PaletteColor(0.97, 0.01, 260, Color.FromRgb(0xF8, 0xFA, 0xFC)),
-                Text2 = new PaletteColor(0.80, 0.01, 260, Color.FromRgb(0xE2, 0xE8, 0xF0)),
-                Text3 = new PaletteColor(0.65, 0.01, 260, Color.FromRgb(0x94, 0xA3, 0xB8)),
+                Background = new PaletteColor(0.145, 0.016, baseH, bgCol),
+                Surface = new PaletteColor(0.185, 0.019, baseH, surfCol),
+                Surface2 = new PaletteColor(0.217, 0.022, baseH, surf2Col),
+                Accent = new PaletteColor(0.680, 0.165, accH, accCol),
+                AccentInk = new PaletteColor(0.830, 0.095, accH, accInkCol),
+                Accent2 = new PaletteColor(0.760, 0.110, 215.0, acc2Col),
+                Glow = new PaletteColor(0.540, 0.140, accH, glowCol),
+                Text = new PaletteColor(0.955, 0.008, baseH, textCol),
+                Text2 = new PaletteColor(0.840, 0.012, baseH, text2Col),
+                Text3 = new PaletteColor(0.670, 0.014, baseH, text3Col),
                 Swatches = new List<Color>
                 {
-                    Color.FromRgb(0x0E, 0x11, 0x1A), Color.FromRgb(0x14, 0x18, 0x26),
-                    Color.FromRgb(0x38, 0xBD, 0xF8), Color.FromRgb(0x63, 0x66, 0xF1),
-                    Color.FromRgb(0x10, 0xB9, 0x81), Color.FromRgb(0x05, 0x96, 0x69)
+                    surfCol, surf2Col, acc2Col, accCol,
+                    LchToColor(0.700, 0.145, 162.0), LchToColor(0.560, 0.125, 162.0)
                 }
             };
         }
@@ -576,6 +585,18 @@ namespace Mavdown.Desktop.Services
 
             window.Dispatcher.Invoke(() =>
             {
+                double sign = palette.IsDark ? 1.0 : -1.0;
+                double bgL = palette.Background.L;
+                double bgC = palette.Background.C;
+                double bgH = palette.Background.H;
+                double surfL = palette.Surface.L;
+                double surfC = palette.Surface.C;
+                double surf2L = palette.Surface2.L;
+                double surf2C = palette.Surface2.C;
+                double accL = palette.Accent.L;
+                double accC = palette.Accent.C;
+                double accH = palette.Accent.H;
+
                 Color bgMaster = palette.Background.Color;
                 Color surfCol = palette.Surface.Color;
                 Color surf2Col = palette.Surface2.Color;
@@ -585,59 +606,36 @@ namespace Mavdown.Desktop.Services
                 Color bodyTextCol = palette.Text2.Color;
                 Color mutedTextCol = palette.Text3.Color;
 
-                // Hitung turunan warna harmonis
-                byte rDim = (byte)(mutedTextCol.R * 0.8);
-                byte gDim = (byte)(mutedTextCol.G * 0.8);
-                byte bDim = (byte)(mutedTextCol.B * 0.8);
-                Color dimTextCol = Color.FromRgb(rDim, gDim, bDim);
+                // Turunan warna murni di ruang OKLCH (tanpa sRGB scaling / hue drift)
+                Color dimTextCol = LchToColor(palette.Text3.L - sign * 0.09, palette.Text3.C, palette.Text3.H);
+                Color sidebarBg = LchToColor(bgL + sign * 0.014, bgC * 0.92, bgH);
 
-                Color sidebarBg = Color.FromArgb(255, 
-                    (byte)Math.Clamp(bgMaster.R * 0.88, 0, 255), 
-                    (byte)Math.Clamp(bgMaster.G * 0.88, 0, 255), 
-                    (byte)Math.Clamp(bgMaster.B * 0.88, 0, 255));
+                Color cardBgEnd = LchToColor(surfL - sign * 0.014, surfC * 0.95, bgH);
+                Color cardBorderStart = LchToColor(bgL + sign * 0.13, Math.Min(accC * 0.35, 0.055), bgH, 145);
+                Color cardBorderEnd = LchToColor(bgL + sign * 0.06, Math.Min(accC * 0.20, 0.035), bgH, 55);
 
-                Color cardBgEnd = Color.FromArgb(255, 
-                    (byte)Math.Clamp(surfCol.R * 0.78, 0, 255), 
-                    (byte)Math.Clamp(surfCol.G * 0.78, 0, 255), 
-                    (byte)Math.Clamp(surfCol.B * 0.78, 0, 255));
+                Color innerBgEnd = LchToColor(surf2L - sign * 0.012, surf2C * 0.95, bgH);
+                Color innerBorder = LchToColor(bgL + sign * 0.10, Math.Min(accC * 0.25, 0.040), bgH, 115);
 
-                Color cardBorderStart = Color.FromArgb(140, 
-                    (byte)Math.Clamp(accentCol.R * 0.40 + surf2Col.R * 0.60, 0, 255), 
-                    (byte)Math.Clamp(accentCol.G * 0.40 + surf2Col.G * 0.60, 0, 255), 
-                    (byte)Math.Clamp(accentCol.B * 0.40 + surf2Col.B * 0.60, 0, 255));
-                Color cardBorderEnd = Color.FromArgb(45, cardBorderStart.R, cardBorderStart.G, cardBorderStart.B);
+                Color segmentBg = LchToColor(bgL - sign * 0.015, bgC * 0.85, bgH);
+                Color controlHoverCol = LchToColor(surf2L + sign * 0.035, Math.Min(surf2C + 0.010, 0.050), bgH);
+                Color controlHoverBorderCol = LchToColor(surf2L + sign * 0.12, Math.Min(accC * 0.45, 0.070), accH, 175);
+                Color controlPressedCol = LchToColor(surfL, surfC, bgH);
 
-                Color innerBgEnd = Color.FromArgb(255, 
-                    (byte)Math.Clamp(surf2Col.R * 0.85, 0, 255), 
-                    (byte)Math.Clamp(surf2Col.G * 0.85, 0, 255), 
-                    (byte)Math.Clamp(surf2Col.B * 0.85, 0, 255));
+                Color borderDark = LchToColor(bgL + sign * 0.085, bgC * 1.1, bgH, 110);
+                Color borderLight = LchToColor(bgL + sign * 0.145, Math.Min(accC * 0.30, 0.050), bgH, 130);
 
-                Color innerBorder = Color.FromArgb(110, 
-                    (byte)Math.Clamp(accentCol.R * 0.30 + surf2Col.R * 0.70, 0, 255), 
-                    (byte)Math.Clamp(accentCol.G * 0.30 + surf2Col.G * 0.70, 0, 255), 
-                    (byte)Math.Clamp(accentCol.B * 0.30 + surf2Col.B * 0.70, 0, 255));
+                Color navActiveStart = LchToColor(bgL + sign * 0.065, Math.Min(accC * 0.42, 0.075), accH, 215);
+                Color navActiveEnd = LchToColor(bgL + sign * 0.035, Math.Min(accC * 0.22, 0.045), accH, 140);
+                Color navActiveBorderCol = LchToColor(accL, accC * 0.75, accH, 140);
+                Color navActiveFg = palette.AccentInk.Color;
 
-                Color segmentBg = Color.FromArgb(255, 
-                    (byte)Math.Clamp(surfCol.R * 0.58, 0, 255), 
-                    (byte)Math.Clamp(surfCol.G * 0.58, 0, 255), 
-                    (byte)Math.Clamp(surfCol.B * 0.58, 0, 255));
+                // Kontras teks di atas Accent berdasarkan OKLCH L (boundary L > 0.6)
+                Color accentFg = accL > 0.62 ? LchToColor(0.14, 0.01, bgH) : Colors.White;
+                Color accentHoverCol = LchToColor(accL + sign * 0.06, Math.Min(accC * 1.04, 0.24), accH);
+                Color segActiveEnd = LchToColor(accL - 0.065, accC * 0.95, accH);
 
-                Color borderDark = Color.FromArgb(65, cardBorderStart.R, cardBorderStart.G, cardBorderStart.B);
-                Color borderLight = Color.FromArgb(95, cardBorderStart.R, cardBorderStart.G, cardBorderStart.B);
-
-                Color navActiveBg = Color.FromArgb(48, accentCol.R, accentCol.G, accentCol.B);
-                Color navActiveFg = accentCol;
-
-                // Tentukan kontras warna teks di atas Accent
-                double accLum = (0.299 * accentCol.R + 0.587 * accentCol.G + 0.114 * accentCol.B) / 255.0;
-                Color accentFg = accLum > 0.55 ? Color.FromRgb(0x11, 0x13, 0x17) : Colors.White;
-
-                Color accentHoverCol = Color.FromArgb(255, 
-                    (byte)Math.Clamp(accentCol.R * 0.88, 0, 255), 
-                    (byte)Math.Clamp(accentCol.G * 0.88, 0, 255), 
-                    (byte)Math.Clamp(accentCol.B * 0.88, 0, 255));
-
-                // Brush instances (All Vertical Single Direction: Top-to-Bottom 0,0 -> 0,1)
+                // Brush instances (Vertical Single Direction: Top-to-Bottom 0,0 -> 0,1)
                 var bgMasterBrush = new SolidColorBrush(bgMaster);
                 var sidebarBgBrush = new SolidColorBrush(sidebarBg);
                 var cardBgBrush = new LinearGradientBrush(surfCol, cardBgEnd, new Point(0, 0), new Point(0, 1));
@@ -645,6 +643,9 @@ namespace Mavdown.Desktop.Services
                 var innerBrush = new LinearGradientBrush(surf2Col, innerBgEnd, new Point(0, 0), new Point(0, 1));
                 var innerBorderBrush = new SolidColorBrush(innerBorder);
                 var segmentBgBrush = new SolidColorBrush(segmentBg);
+                var controlHoverBrush = new SolidColorBrush(controlHoverCol);
+                var controlHoverBorderBrush = new SolidColorBrush(controlHoverBorderCol);
+                var controlPressedBrush = new SolidColorBrush(controlPressedCol);
                 var accentBrush = new SolidColorBrush(accentCol);
                 var accentHoverBrush = new SolidColorBrush(accentHoverCol);
                 var accentFgBrush = new SolidColorBrush(accentFg);
@@ -652,8 +653,10 @@ namespace Mavdown.Desktop.Services
                 var bodyTextBrush = new SolidColorBrush(bodyTextCol);
                 var mutedTextBrush = new SolidColorBrush(mutedTextCol);
                 var dimTextBrush = new SolidColorBrush(dimTextCol);
-                var navActiveBgBrush = new SolidColorBrush(navActiveBg);
+                var navActiveBgBrush = new LinearGradientBrush(navActiveStart, navActiveEnd, new Point(0, 0), new Point(1, 0));
+                var navActiveBorderBrush = new SolidColorBrush(navActiveBorderCol);
                 var navActiveFgBrush = new SolidColorBrush(navActiveFg);
+                var segActiveBrush = new LinearGradientBrush(accentCol, segActiveEnd, new Point(0, 0), new Point(0, 1));
 
                 // Update Application-wide Resources (semua DynamicResource langsung aktif!)
                 Application.Current.Resources["BrushBgMaster"] = bgMasterBrush;
@@ -667,6 +670,9 @@ namespace Mavdown.Desktop.Services
                 Application.Current.Resources["BrushGatefoldInner"] = innerBrush;
                 Application.Current.Resources["BrushGatefoldInnerBorder"] = innerBorderBrush;
                 Application.Current.Resources["BrushGatefoldSegmentBg"] = segmentBgBrush;
+                Application.Current.Resources["BrushControlHover"] = controlHoverBrush;
+                Application.Current.Resources["BrushControlHoverBorder"] = controlHoverBorderBrush;
+                Application.Current.Resources["BrushControlPressed"] = controlPressedBrush;
                 Application.Current.Resources["BrushAccentIndigo"] = accentBrush;
                 Application.Current.Resources["BrushAccentIndigoHover"] = accentHoverBrush;
                 Application.Current.Resources["BrushAccentForeground"] = accentFgBrush;
@@ -675,7 +681,9 @@ namespace Mavdown.Desktop.Services
                 Application.Current.Resources["BrushTextMuted"] = mutedTextBrush;
                 Application.Current.Resources["BrushTextDim"] = dimTextBrush;
                 Application.Current.Resources["BrushNavActiveBg"] = navActiveBgBrush;
+                Application.Current.Resources["BrushNavActiveBorder"] = navActiveBorderBrush;
                 Application.Current.Resources["BrushNavActiveFg"] = navActiveFgBrush;
+                Application.Current.Resources["BrushGradientSegmentActive"] = segActiveBrush;
 
                 // Window Background
                 window.Background = bgMasterBrush;

@@ -4,26 +4,26 @@
              xmlns:local="clr-namespace:Mavdown.Desktop"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-        <!-- Mavdown Refined Dark Palette (Harmonious Gatefold Architecture) -->
-        <Color x:Key="BgMaster">#080A10</Color>
-        <Color x:Key="SidebarBg">#0B0D14</Color>
-        <Color x:Key="CardBg">#0E111A</Color>
-        <Color x:Key="CardInner">#141826</Color>
-        <Color x:Key="BorderDark">#171D2C</Color>
-        <Color x:Key="BorderLight">#222A3E</Color>
-        <Color x:Key="AccentIndigo">#6366F1</Color>
-        <Color x:Key="AccentIndigoHover">#4F46E5</Color>
+        <!-- Mavdown Perceptual OKLCH Dark Palette (Constant-Hue 262° Ramp, Zero Hue Drift) -->
+        <Color x:Key="BgMaster">#090A11</Color>
+        <Color x:Key="SidebarBg">#0C0E16</Color>
+        <Color x:Key="CardBg">#11131E</Color>
+        <Color x:Key="CardInner">#181A27</Color>
+        <Color x:Key="BorderDark">#1B1F2E</Color>
+        <Color x:Key="BorderLight">#282D42</Color>
+        <Color x:Key="AccentIndigo">#696DF4</Color>
+        <Color x:Key="AccentIndigoHover">#7E82FA</Color>
         <Color x:Key="AccentEmerald">#10B981</Color>
         <Color x:Key="AccentEmeraldHover">#059669</Color>
         <Color x:Key="AccentAmber">#D97706</Color>
         <Color x:Key="AccentAmberHover">#B45309</Color>
         <Color x:Key="AccentRose">#EF4444</Color>
         <Color x:Key="AccentRoseHover">#DC2626</Color>
-        <Color x:Key="TextTitle">#F8FAFC</Color>
-        <Color x:Key="TextBody">#E2E8F0</Color>
-        <Color x:Key="TextMuted">#94A3B8</Color>
-        <Color x:Key="TextDim">#64748B</Color>
-        <Color x:Key="TextAccent">#38BDF8</Color>
+        <Color x:Key="TextTitle">#EFEFF4</Color>
+        <Color x:Key="TextBody">#C7CAD6</Color>
+        <Color x:Key="TextMuted">#9095A5</Color>
+        <Color x:Key="TextDim">#737788</Color>
+        <Color x:Key="TextAccent">#3AC0F8</Color>
 
         <SolidColorBrush x:Key="BrushBgMaster" Color="{StaticResource BgMaster}" />
         <SolidColorBrush x:Key="BrushSidebarBg" Color="{StaticResource SidebarBg}" />
@@ -43,35 +43,35 @@
         <SolidColorBrush x:Key="BrushTextDim" Color="{StaticResource TextDim}" />
         <SolidColorBrush x:Key="BrushTextAccent" Color="{StaticResource TextAccent}" />
 
-        <!-- Gatefold Harmonious Multi-Stop Diagonal Gradients (Modern Linear/Raycast Dark Luxury) -->
-        <LinearGradientBrush x:Key="BrushGatefoldCardBg" StartPoint="0,0" EndPoint="0.85,1.0">
-            <GradientStop Color="#141826" Offset="0.0" />
-            <GradientStop Color="#0F121E" Offset="0.5" />
-            <GradientStop Color="#090B13" Offset="1.0" />
+        <!-- Gatefold Perceptual OKLCH Gradients (Constant-Hue Smooth Tonal Steps) -->
+        <LinearGradientBrush x:Key="BrushGatefoldCardBg" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#11131E" Offset="0.0" />
+            <GradientStop Color="#0E1019" Offset="1.0" />
         </LinearGradientBrush>
 
-        <LinearGradientBrush x:Key="BrushGatefoldBorder" StartPoint="0,0" EndPoint="1,1">
-            <GradientStop Color="#2B3650" Offset="0.0" />
-            <GradientStop Color="#1A2234" Offset="0.5" />
-            <GradientStop Color="#101420" Offset="1.0" />
+        <LinearGradientBrush x:Key="BrushGatefoldBorder" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#91282D42" Offset="0.0" />
+            <GradientStop Color="#37191D2A" Offset="1.0" />
         </LinearGradientBrush>
 
-        <LinearGradientBrush x:Key="BrushGatefoldInner" StartPoint="0,0" EndPoint="1,1">
-            <GradientStop Color="#161B29" Offset="0.0" />
-            <GradientStop Color="#0E121E" Offset="1.0" />
+        <LinearGradientBrush x:Key="BrushGatefoldInner" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#181A27" Offset="0.0" />
+            <GradientStop Color="#151722" Offset="1.0" />
         </LinearGradientBrush>
 
-        <SolidColorBrush x:Key="BrushGatefoldInnerBorder" Color="#1E273C" />
-        <SolidColorBrush x:Key="BrushGatefoldSegmentBg" Color="#090B12" />
+        <SolidColorBrush x:Key="BrushGatefoldInnerBorder" Color="#7324293D" />
+        <SolidColorBrush x:Key="BrushGatefoldSegmentBg" Color="#07080E" />
+        <SolidColorBrush x:Key="BrushControlHover" Color="#202334" />
+        <SolidColorBrush x:Key="BrushControlHoverBorder" Color="#AF383F5E" />
+        <SolidColorBrush x:Key="BrushControlPressed" Color="#11131E" />
 
-        <!-- Navigation Active Tab (Sleek Horizontal Sheen) -->
+        <!-- Navigation Active Tab (OKLCH Constant-Hue Sheen) -->
         <LinearGradientBrush x:Key="BrushNavActiveBg" StartPoint="0,0" EndPoint="1,0">
-            <GradientStop Color="#28225C" Offset="0.0" />
-            <GradientStop Color="#1A1838" Offset="0.6" />
-            <GradientStop Color="#101324" Offset="1.0" />
+            <GradientStop Color="#D71B1E34" Offset="0.0" />
+            <GradientStop Color="#8C131524" Offset="1.0" />
         </LinearGradientBrush>
-        <SolidColorBrush x:Key="BrushNavActiveBorder" Color="#4338CA" />
-        <SolidColorBrush x:Key="BrushNavActiveFg" Color="#C7D2FE" />
+        <SolidColorBrush x:Key="BrushNavActiveBorder" Color="#8C595DC8" />
+        <SolidColorBrush x:Key="BrushNavActiveFg" Color="#B1B9FA" />
 
         <!-- Modern Action Gradients (Vibrant Light Source Top-Left -> Bottom-Right) -->
         <LinearGradientBrush x:Key="BrushGradientEmerald" StartPoint="0,0" EndPoint="1,1">
@@ -151,13 +151,13 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="border" Property="Background" Value="#222B3F" />
-                                <Setter TargetName="border" Property="BorderBrush" Value="#3B4968" />
+                                <Setter TargetName="border" Property="Background" Value="{DynamicResource BrushControlHover}" />
+                                <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource BrushControlHoverBorder}" />
                                 <Setter Property="Foreground" Value="{DynamicResource BrushTextTitle}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="border" Property="Background" Value="#171D2B" />
-                                <Setter TargetName="border" Property="BorderBrush" Value="#242F46" />
+                                <Setter TargetName="border" Property="Background" Value="{DynamicResource BrushControlPressed}" />
+                                <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource BrushGatefoldInnerBorder}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="border" Property="Opacity" Value="0.4" />
