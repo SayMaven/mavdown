@@ -104,6 +104,7 @@ namespace Mavdown.Desktop
 
             // Muat konfigurasi lokal secara instan (0ms delay) agar auto-clipboard & preferensi langsung aktif
             LoadInitialLocalConfig();
+            WirePersistentControls();
 
             Closing += (s, e) =>
             {
@@ -929,20 +930,104 @@ namespace Mavdown.Desktop
                         }
                     }
                 }
+                if (cfg["ytdlp_channel"] != null && ComboYtdlpChannel != null)
+                {
+                    string ch = cfg["ytdlp_channel"]!.ToString().ToLowerInvariant();
+                    ComboYtdlpChannel.SelectedIndex = ch.Contains("nightly") ? 1 : 0;
+                }
                 if (cfg["preferences"] is JsonObject prefs)
                 {
-                    if (prefs["embed_thumbnail"] != null)
-                        CheckEmbedThumb.IsChecked = prefs["embed_thumbnail"]!.GetValue<bool>();
-                    if (prefs["use_aria2"] != null)
-                        CheckUseAria2.IsChecked = prefs["use_aria2"]!.GetValue<bool>();
-                    if (prefs["download_subs"] != null)
-                        CheckDownloadSubs.IsChecked = prefs["download_subs"]!.GetValue<bool>();
-                    if (prefs["embed_subs"] != null)
-                        CheckEmbedSubs.IsChecked = prefs["embed_subs"]!.GetValue<bool>();
+                    if (prefs["mode"] != null)
+                    {
+                        bool isAudio = string.Equals(prefs["mode"]!.ToString(), "audio_only", StringComparison.OrdinalIgnoreCase);
+                        RadioAudio.IsChecked = isAudio;
+                        RadioVideo.IsChecked = !isAudio;
+                    }
+                    if (prefs["ugoira_format"] != null)
+                    {
+                        bool isGif = string.Equals(prefs["ugoira_format"]!.ToString(), "gif", StringComparison.OrdinalIgnoreCase);
+                        RadioUgoiraGif.IsChecked = isGif;
+                        RadioUgoiraMp4.IsChecked = !isGif;
+                    }
+                    if (prefs["container"] != null)
+                    {
+                        string c = prefs["container"]!.ToString().ToLowerInvariant();
+                        RadContAuto.IsChecked = c == "auto";
+                        RadContMp4.IsChecked = c == "mp4";
+                        RadContMkv.IsChecked = c == "mkv";
+                        RadContWebm.IsChecked = c == "webm";
+                        RadContMov.IsChecked = c == "mov";
+                    }
+                    if (prefs["vcodec"] != null)
+                    {
+                        string vc = prefs["vcodec"]!.ToString().ToLowerInvariant();
+                        RadVCodecAuto.IsChecked = vc == "auto";
+                        RadVCodecH264.IsChecked = vc == "h264";
+                        RadVCodecVp9.IsChecked = vc == "vp9";
+                        RadVCodecAv1.IsChecked = vc == "av1";
+                    }
+                    if (prefs["acodec"] != null)
+                    {
+                        string ac = prefs["acodec"]!.ToString().ToLowerInvariant();
+                        RadACodecAuto.IsChecked = ac == "auto";
+                        RadACodecM4a.IsChecked = ac == "m4a";
+                        RadACodecOpus.IsChecked = ac == "opus";
+                    }
+                    if (prefs["resolution"] != null)
+                    {
+                        string r = prefs["resolution"]!.ToString().ToLowerInvariant();
+                        RadResAuto.IsChecked = r == "best" || r == "auto";
+                        RadRes4k.IsChecked = r == "2160" || r == "4k";
+                        RadRes1440.IsChecked = r == "1440";
+                        RadRes1080.IsChecked = r == "1080";
+                        RadRes720.IsChecked = r == "720";
+                        RadRes480.IsChecked = r == "480";
+                        RadRes360.IsChecked = r == "360";
+                    }
+                    if (prefs["audio_format"] != null)
+                    {
+                        string af = prefs["audio_format"]!.ToString().ToLowerInvariant();
+                        RadAudioMp3.IsChecked = af == "mp3";
+                        RadAudioM4a.IsChecked = af == "m4a";
+                        RadAudioFlac.IsChecked = af == "flac";
+                        RadAudioWav.IsChecked = af == "wav";
+                        RadAudioOpus.IsChecked = af == "opus";
+                    }
+                    if (prefs["audio_bitrate"] != null)
+                    {
+                        string br = prefs["audio_bitrate"]!.ToString();
+                        RadBitrate320.IsChecked = br == "320";
+                        RadBitrate256.IsChecked = br == "256";
+                        RadBitrate192.IsChecked = br == "192";
+                        RadBitrate128.IsChecked = br == "128";
+                    }
+                    if (prefs["subs_preset_index"] != null && ComboSubsLang != null)
+                    {
+                        int idx = SafeGetInt(prefs, "subs_preset_index", 0);
+                        if (idx >= 0 && idx < ComboSubsLang.Items.Count)
+                            ComboSubsLang.SelectedIndex = idx;
+                    }
                     if (prefs["subs_lang"] != null)
                         SubsLangEntry.Text = prefs["subs_lang"]!.ToString();
+                    if (prefs["embed_thumbnail"] != null)
+                        CheckEmbedThumb.IsChecked = SafeGetBool(prefs, "embed_thumbnail", true);
+                    if (prefs["use_aria2"] != null)
+                        CheckUseAria2.IsChecked = SafeGetBool(prefs, "use_aria2", true);
+                    if (prefs["download_subs"] != null)
+                        CheckDownloadSubs.IsChecked = SafeGetBool(prefs, "download_subs", false);
+                    if (prefs["embed_subs"] != null)
+                        CheckEmbedSubs.IsChecked = SafeGetBool(prefs, "embed_subs", true);
                     if (prefs["download_playlist"] != null)
-                        CheckPlaylist.IsChecked = prefs["download_playlist"]!.GetValue<bool>();
+                        CheckPlaylist.IsChecked = SafeGetBool(prefs, "download_playlist", false);
+                    if (prefs["theme_mode"] != null)
+                    {
+                        string tm = prefs["theme_mode"]!.ToString().ToLowerInvariant();
+                        GatePaletteService.CurrentThemeMode = tm;
+                        RadioThemeDarkAdaptive.IsChecked = tm == "dark";
+                        RadioThemeFullAuto.IsChecked = tm == "auto";
+                        RadioThemeStatic.IsChecked = tm == "static";
+                    }
+                    ApplyStudioModeAdaptation();
                 }
                 if (cfg["ytdlp_version"] != null)
                 {
@@ -963,6 +1048,109 @@ namespace Mavdown.Desktop
             {
                 _isApplyingConfig = false;
             }
+        }
+
+        private void WirePersistentControls()
+        {
+            RadioButton?[] radios = {
+                RadContAuto, RadContMp4, RadContMkv, RadContWebm, RadContMov,
+                RadVCodecAuto, RadVCodecH264, RadVCodecVp9, RadVCodecAv1,
+                RadACodecAuto, RadACodecM4a, RadACodecOpus,
+                RadResAuto, RadRes4k, RadRes1440, RadRes1080, RadRes720, RadRes480, RadRes360,
+                RadAudioMp3, RadAudioM4a, RadAudioFlac, RadAudioWav, RadAudioOpus,
+                RadBitrate320, RadBitrate256, RadBitrate192, RadBitrate128
+            };
+            foreach (var rb in radios)
+            {
+                if (rb != null)
+                    rb.Checked += (_, _) => SaveUiPreferences();
+            }
+
+            CheckBox?[] checks = { CheckEmbedThumb, CheckUseAria2, CheckEmbedSubs, CheckDownloadSubs, CheckPlaylist };
+            foreach (var cb in checks)
+            {
+                if (cb != null)
+                {
+                    cb.Checked += (_, _) => SaveUiPreferences();
+                    cb.Unchecked += (_, _) => SaveUiPreferences();
+                }
+            }
+
+            if (SubsLangEntry != null)
+            {
+                SubsLangEntry.TextChanged += (_, _) => SaveUiPreferences();
+            }
+
+            if (ComboYtdlpChannel != null)
+            {
+                ComboYtdlpChannel.SelectionChanged += (_, _) =>
+                {
+                    if (!IsLoaded || _isApplyingConfig) return;
+                    string ch = ComboYtdlpChannel.SelectedIndex == 1 ? "nightly" : "stable";
+                    _ = _bridge.SendCommandAsync(new { action = "set_config", key = "ytdlp_channel", value = ch });
+                };
+            }
+        }
+
+        private void SaveUiPreferences()
+        {
+            if (!IsLoaded || _isApplyingConfig) return;
+
+            string container = RadContMp4?.IsChecked == true ? "mp4"
+                : RadContMkv?.IsChecked == true ? "mkv"
+                : RadContWebm?.IsChecked == true ? "webm"
+                : RadContMov?.IsChecked == true ? "mov"
+                : "auto";
+
+            string vcodec = RadVCodecH264?.IsChecked == true ? "h264"
+                : RadVCodecVp9?.IsChecked == true ? "vp9"
+                : RadVCodecAv1?.IsChecked == true ? "av1"
+                : "auto";
+
+            string acodec = RadACodecM4a?.IsChecked == true ? "m4a"
+                : RadACodecOpus?.IsChecked == true ? "opus"
+                : "auto";
+
+            string res = RadRes4k?.IsChecked == true ? "2160"
+                : RadRes1440?.IsChecked == true ? "1440"
+                : RadRes1080?.IsChecked == true ? "1080"
+                : RadRes720?.IsChecked == true ? "720"
+                : RadRes480?.IsChecked == true ? "480"
+                : RadRes360?.IsChecked == true ? "360"
+                : "best";
+
+            string audioFmt = RadAudioM4a?.IsChecked == true ? "m4a"
+                : RadAudioFlac?.IsChecked == true ? "flac"
+                : RadAudioWav?.IsChecked == true ? "wav"
+                : RadAudioOpus?.IsChecked == true ? "opus"
+                : "mp3";
+
+            string bitrate = RadBitrate256?.IsChecked == true ? "256"
+                : RadBitrate192?.IsChecked == true ? "192"
+                : RadBitrate128?.IsChecked == true ? "128"
+                : "320";
+
+            var prefs = new Dictionary<string, object>
+            {
+                ["mode"] = RadioAudio?.IsChecked == true ? "audio_only" : "video",
+                ["ugoira_format"] = RadioUgoiraGif?.IsChecked == true ? "gif" : "mp4",
+                ["container"] = container,
+                ["vcodec"] = vcodec,
+                ["acodec"] = acodec,
+                ["resolution"] = res,
+                ["audio_format"] = audioFmt,
+                ["audio_bitrate"] = bitrate,
+                ["subs_preset_index"] = ComboSubsLang?.SelectedIndex ?? 0,
+                ["subs_lang"] = SubsLangEntry?.Text ?? "id,en",
+                ["embed_thumbnail"] = CheckEmbedThumb?.IsChecked == true,
+                ["use_aria2"] = CheckUseAria2?.IsChecked == true,
+                ["embed_subs"] = CheckEmbedSubs?.IsChecked == true,
+                ["download_subs"] = CheckDownloadSubs?.IsChecked == true,
+                ["download_playlist"] = CheckPlaylist?.IsChecked == true,
+                ["theme_mode"] = GatePaletteService.CurrentThemeMode
+            };
+
+            _ = _bridge.SendCommandAsync(new { action = "set_config", key = "preferences", value = prefs });
         }
 
         private void AppendLog(string text)
@@ -1068,7 +1256,10 @@ namespace Mavdown.Desktop
         private void OnModeSegmentChange(object sender, RoutedEventArgs e)
         {
             if (IsLoaded)
+            {
                 ApplyStudioModeAdaptation();
+                SaveUiPreferences();
+            }
         }
 
         private void OnUgoiraFormatChange(object sender, RoutedEventArgs e)
@@ -1078,6 +1269,8 @@ namespace Mavdown.Desktop
                 string fmt = RadioUgoiraGif.IsChecked == true ? "GIF" : "MP4";
                 SlidePFormat.Text = $"Target: Video/Animasi ({fmt})";
             }
+            if (IsLoaded)
+                SaveUiPreferences();
         }
 
         private void OnLangPresetChange(object sender, SelectionChangedEventArgs e)
@@ -1095,6 +1288,7 @@ namespace Mavdown.Desktop
                 else if (txt.Contains("Spanyol")) SubsLangEntry.Text = "es";
                 else if (txt.Contains("Semua")) SubsLangEntry.Text = "all";
             }
+            SaveUiPreferences();
         }
         #endregion
 
@@ -2261,6 +2455,8 @@ namespace Mavdown.Desktop
                 GatePaletteService.CurrentThemeMode = "auto";
             else
                 GatePaletteService.CurrentThemeMode = "static";
+
+            SaveUiPreferences();
 
             if (MediaThumbnail?.Source is BitmapSource bmp)
             {

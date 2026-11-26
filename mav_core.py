@@ -27,6 +27,7 @@ from config import (
     load_pixiv_session, save_pixiv_session, load_pixiv_account_name, save_pixiv_account_name,
     load_bilibili_session, save_bilibili_session, load_bilibili_account_name, save_bilibili_account_name,
     load_ytdlp_channel, save_ytdlp_channel, is_aria2_available,
+    save_preferences, load_preferences,
     save_config, _read_raw_config,
     YT_DLP_PATH, ARIA2_PATH, FFMPEG_PATH, FFPROBE_PATH, NODE_PATH
 )
@@ -482,6 +483,7 @@ def handle_get_config(req: dict):
         "has_bilibili_session": bool(load_bilibili_session()),
         "bilibili_account_name": load_bilibili_account_name(),
         "ytdlp_channel": load_ytdlp_channel(),
+        "preferences": load_preferences(),
         "ytdlp_version": get_cached_ytdlp_version(),
         "is_aria2_available": get_cached_aria2_available(),
         "bin_ytdlp": YT_DLP_PATH,
@@ -508,6 +510,8 @@ def handle_set_config(req: dict):
         save_clipboard_monitor(bool(val))
     elif key == "ytdlp_channel":
         save_ytdlp_channel(str(val))
+    elif key == "preferences":
+        save_preferences(val if isinstance(val, dict) else {})
     elif key == "pixiv_session":
         save_pixiv_session(str(val))
     elif key == "bilibili_session":
